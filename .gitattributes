@@ -1,0 +1,5 @@
+# Les scripts shell et fichiers de conteneur doivent rester en LF :
+# en CRLF, le shebang casse au démarrage du conteneur Linux.
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
