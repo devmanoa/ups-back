@@ -133,6 +133,19 @@ Figées d'après les specs OpenAPI officielles
 ([UPS-API/api-documentation](https://github.com/UPS-API/api-documentation)) :
 Tracking `v1`, Rating `v2409`, Shipping `v2409`, Address Validation `v2`, Locator `v3`.
 
+## Déploiement (Docker / Coolify)
+
+```bash
+docker build -t ups-backend .
+docker run -p 3000:3000 --env-file .env ups-backend
+```
+
+Sur Coolify : Build Pack **Dockerfile**, port `3000`, Health Check Path `/health`.
+Toute la configuration passe par les variables d'environnement (voir tableau ci-dessus).
+
+`CORS_ORIGIN` doit contenir l'URL exacte du frontend, sinon les appels seront bloqués
+par le navigateur.
+
 ## Limites connues
 
 - **Validation d'adresse** : l'API UPS ne couvre que les États-Unis et Porto Rico.
