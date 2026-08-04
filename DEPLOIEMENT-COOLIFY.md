@@ -70,17 +70,37 @@ SHIPPER_COUNTRY=FR
 - Port Exposed : `80`
 - Domaine : `https://ups.mondomaine.fr`
 
-**Variable d'environnement :**
+**Variables d'environnement :**
 
 ```
 VITE_API_URL=https://api-ups.mondomaine.fr
+VITE_KEYCLOAK_URL=https://keycloak.orkessi.com
+VITE_KEYCLOAK_REALM=konitys
+VITE_KEYCLOAK_CLIENT_ID=ups-management
+VITE_PLATEFORM_URL=https://plateformdev.orkessi.com
 ```
 
-> Cette URL est injectée **au démarrage du conteneur**, pas au build : la modifier et
-> redémarrer suffit, aucun rebuild n'est nécessaire.
+> Ces variables sont injectées **au démarrage du conteneur**, pas au build : les
+> modifier et redémarrer suffit, aucun rebuild n'est nécessaire.
 >
-> Dans Coolify, décochez « Build Variable » pour cette variable — elle doit être
-> disponible au runtime.
+> Dans Coolify, décochez « Build Variable » pour ces variables — elles doivent être
+> disponibles au runtime.
+>
+> `VITE_PLATEFORM_URL` est facultative : si elle est vide ou injoignable, l'application
+> utilise ses propres header et sidebar, visuellement identiques.
+
+### Prérequis Keycloak
+
+Le client `ups-management` doit exister dans le realm `konitys` **avant** le déploiement,
+sinon la connexion échouera. Dans la console Keycloak :
+
+1. Realm `konitys` → Clients → Create client
+2. Client ID : `ups-management`, type public
+3. Valid Redirect URIs : `https://ups.mondomaine.fr/*`
+4. Web Origins : `https://ups.mondomaine.fr`
+
+> Laisser `VITE_KEYCLOAK_URL` vide désactive l'authentification — pratique en
+> développement local, à proscrire en production.
 
 ---
 
@@ -106,6 +126,9 @@ VITE_API_URL=https://api-ups.mondomaine.fr
 | Badge « Authentification UPS échouée » | Identifiants invalides, ou identifiants de test utilisés en production | Vérifiez les identifiants et la valeur de `UPS_ENV` |
 | Étiquettes en erreur | `UPS_ACCOUNT_NUMBER` absent ou adresse expéditeur incomplète | Complétez les variables `SHIPPER_*` |
 | Healthcheck backend en échec | Application non démarrée | Consultez les logs Coolify ; `/health` répond même sans identifiants UPS |
+| Boucle de redirection Keycloak | Redirect URI non déclarée | Ajoutez `https://ups.mondomaine.fr/*` dans Valid Redirect URIs du client |
+| « Authentification requise » à l'écran | Client Keycloak inexistant ou realm erroné | Vérifiez que `ups-management` existe dans le realm `konitys` |
+| Header/sidebar différents de la plateforme | `VITE_PLATEFORM_URL` absente ou injoignable | Normal : les composants locaux prennent le relais. Renseignez la variable pour utiliser ceux de la plateforme |
 
 ---
 
