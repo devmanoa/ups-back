@@ -78,6 +78,7 @@ VITE_KEYCLOAK_URL=https://keycloak.orkessi.com
 VITE_KEYCLOAK_REALM=konitys
 VITE_KEYCLOAK_CLIENT_ID=ups-management
 VITE_PLATEFORM_URL=https://plateformdev.orkessi.com
+VITE_GOOGLE_MAPS_API_KEY=<clé Google Places>
 ```
 
 > Ces variables sont injectées **au démarrage du conteneur**, pas au build : les
@@ -129,6 +130,7 @@ sinon la connexion échouera. Dans la console Keycloak :
 | Boucle de redirection Keycloak | Redirect URI non déclarée | Ajoutez `https://ups.mondomaine.fr/*` dans Valid Redirect URIs du client |
 | « Authentification requise » à l'écran | Client Keycloak inexistant ou realm erroné | Vérifiez que `ups-management` existe dans le realm `konitys` |
 | Header/sidebar différents de la plateforme | `VITE_PLATEFORM_URL` absente ou injoignable | Normal : les composants locaux prennent le relais. Renseignez la variable pour utiliser ceux de la plateforme |
+| Pas de suggestions d'adresse | `VITE_GOOGLE_MAPS_API_KEY` absente, API Places non activée, ou domaine non autorisé | Vérifiez la clé, activez l'API Places et ajoutez le domaine dans les restrictions HTTP referrers |
 
 ---
 
