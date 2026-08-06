@@ -68,6 +68,7 @@ export async function getRates({
   requestOption = 'Shop',
   serviceCode,
   negotiatedRates = true,
+  accessPoint,
 }) {
   const from = shipFrom || {
     addressLine1: config.shipper.addressLine,
@@ -107,6 +108,18 @@ export async function getRates({
         ...(useNegotiated
           ? { ShipmentRatingOptions: { NegotiatedRatesIndicator: 'Y' } }
           : {}),
+        // Tarification vers un point relais. UPS impose que l'indicateur soit
+        // accompagné de l'adresse du point (AlternateDeliveryAddress) : sans
+        // elle, les services Access Point sont rejetés.
+        ...(accessPoint
+          ? {
+              ShipmentIndicationType: [{ Code: accessPoint.indicationType || '02' }],
+              AlternateDeliveryAddress: {
+                Name: accessPoint.name || 'Point relais',
+                Address: buildAddress(accessPoint),
+              },
+            }
+          : {}),
       },
     },
   };
@@ -116,8 +129,16 @@ export async function getRates({
 }
 
 function normalizeRates(data) {
+  // En mode Shop, UPS tarife tous les services et signale par une alerte ceux
+  // qui ne s'appliquent pas (ex. Access Point Economy sans point relais).
+  // Ces alertes ne doivent pas masquer les tarifs valides.
+  const alertsRaw = data?.RateResponse?.Response?.Alert;
+  const warnings = (Array.isArray(alertsRaw) ? alertsRaw : alertsRaw ? [alertsRaw] : []).map(
+    (a) => ({ code: a.Code || '', message: a.Description || '' }),
+  );
+
   const rated = data?.RateResponse?.RatedShipment;
-  if (!rated) return { rates: [], raw: data };
+  if (!rated) return { rates: [], warnings, raw: data };
 
   const list = Array.isArray(rated) ? rated : [rated];
 
@@ -143,5 +164,5 @@ function normalizeRates(data) {
   });
 
   rates.sort((a, b) => a.totalCharges - b.totalCharges);
-  return { rates, raw: data };
+  return { rates, warnings, raw: data };
 }

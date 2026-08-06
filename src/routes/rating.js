@@ -18,7 +18,15 @@ ratingRouter.get('/services', (req, res) => {
 ratingRouter.post(
   '/',
   asyncHandler(async (req, res) => {
-    const { shipTo, shipFrom, packages, requestOption = 'Shop', serviceCode, negotiatedRates } = req.body;
+    const {
+      shipTo,
+      shipFrom,
+      packages,
+      requestOption = 'Shop',
+      serviceCode,
+      negotiatedRates,
+      accessPoint,
+    } = req.body;
 
     if (!shipTo) throw badRequest('Le champ "shipTo" est obligatoire.');
     requireFields(shipTo, ['postalCode', 'country'], 'champ shipTo');
@@ -28,6 +36,11 @@ ratingRouter.post(
       throw badRequest(`requestOption invalide. Valeurs acceptées: ${VALID_OPTIONS.join(', ')}`);
     }
 
+    // Un point relais doit au minimum porter un pays pour être adressable.
+    if (accessPoint && !accessPoint.country) {
+      throw badRequest('accessPoint.country est obligatoire pour tarifer vers un point relais.');
+    }
+
     const result = await getRates({
       shipFrom,
       shipTo,
@@ -35,6 +48,7 @@ ratingRouter.post(
       requestOption,
       serviceCode,
       negotiatedRates: negotiatedRates !== false,
+      accessPoint,
     });
 
     res.json({ success: true, data: result });
