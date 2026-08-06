@@ -54,17 +54,11 @@ export async function findAccessPoints({
         Locale: locale,
       },
       UnitOfMeasurement: { Code: unit },
+      // Le filtrage sur les points relais est déjà porté par reqOption=64 :
+      // un SearchOption supplémentaire serait redondant.
       LocationSearchCriteria: {
         MaximumListSize: String(maxResults),
         SearchRadius: String(radius),
-        // 01/018 = filtre "UPS Access Point" côté critères de recherche.
-        SearchOption: [
-          {
-            OptionType: { Code: '01' },
-            OptionCode: [{ Code: '018' }],
-            Relation: { Code: '01' },
-          },
-        ],
       },
       SortCriteria: { SortType: '01' }, // tri par distance
     },
