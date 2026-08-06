@@ -14,9 +14,11 @@ if (!BASE_URLS[env]) {
 export const config = {
   env,
   baseUrl: BASE_URLS[env],
-  clientId: process.env.UPS_CLIENT_ID || '',
-  clientSecret: process.env.UPS_CLIENT_SECRET || '',
-  accountNumber: process.env.UPS_ACCOUNT_NUMBER || '',
+  // trim() : un espace ou un retour-ligne collé par erreur dans l'interface de
+  // déploiement casserait l'encodage Basic sans message explicite.
+  clientId: (process.env.UPS_CLIENT_ID || '').trim(),
+  clientSecret: (process.env.UPS_CLIENT_SECRET || '').trim(),
+  accountNumber: (process.env.UPS_ACCOUNT_NUMBER || '').trim(),
   port: Number(process.env.PORT) || 3000,
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
     .split(',')

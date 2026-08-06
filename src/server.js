@@ -7,6 +7,7 @@ import { ratingRouter } from './routes/rating.js';
 import { shippingRouter } from './routes/shipping.js';
 import { addressRouter } from './routes/addressValidation.js';
 import { locatorRouter } from './routes/locator.js';
+import { diagnosticRouter } from './routes/diagnostic.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { asyncHandler } from './middleware/validate.js';
 
@@ -42,6 +43,7 @@ app.use('/api/rating', ratingRouter);
 app.use('/api/shipping', shippingRouter);
 app.use('/api/address', addressRouter);
 app.use('/api/locator', locatorRouter);
+app.use('/api/diagnostic', diagnosticRouter);
 
 app.use(notFound);
 app.use(errorHandler);
