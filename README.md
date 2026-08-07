@@ -45,6 +45,15 @@ Le serveur écoute sur `http://localhost:3000`.
 | `DELETE` | `/api/shipping/:shipmentId` | Annulation d'une expédition |
 | `POST` | `/api/address/validate` | Validation d'adresse (US/PR uniquement) |
 | `POST` | `/api/locator/access-points` | Recherche de points relais |
+| `GET` | `/api/diagnostic` | Teste chaque étape (config, jeton, APIs) et localise une panne |
+| `POST` | `/api/transit-times` | Délais de livraison estimés |
+| `POST` | `/api/landed-cost` | Droits de douane et taxes à l'import |
+| `GET` | `/api/pickup/containers` | Types de conditionnement |
+| `POST` | `/api/pickup` | Planification d'un enlèvement |
+| `DELETE` | `/api/pickup/:prn` | Annulation d'un enlèvement |
+| `GET` | `/api/paperless/document-types` | Types de documents douaniers |
+| `POST` | `/api/paperless/upload` | Téléversement d'un document douanier |
+| `POST` | `/api/paperless/link` | Rattachement d'un document à une expédition |
 
 ### Exemples
 

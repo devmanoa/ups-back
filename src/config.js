@@ -46,6 +46,10 @@ export const API_VERSIONS = {
   shipping: 'v2409',
   addressValidation: 'v2',
   locator: 'v3',
+  pickup: 'v2409',
+  timeInTransit: 'v1',
+  landedCost: 'v1',
+  paperless: 'v2',
 };
 
 export function assertCredentials() {

@@ -8,14 +8,19 @@ import { shippingRouter } from './routes/shipping.js';
 import { addressRouter } from './routes/addressValidation.js';
 import { locatorRouter } from './routes/locator.js';
 import { diagnosticRouter } from './routes/diagnostic.js';
+import { timeInTransitRouter } from './routes/timeInTransit.js';
+import { landedCostRouter } from './routes/landedCost.js';
+import { pickupRouter } from './routes/pickup.js';
+import { paperlessRouter } from './routes/paperless.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { asyncHandler } from './middleware/validate.js';
 
 const app = express();
 
 app.use(cors({ origin: config.corsOrigin }));
-// Les étiquettes en base64 peuvent être volumineuses.
-app.use(express.json({ limit: '2mb' }));
+// Étiquettes et documents douaniers transitent en base64 : un document de
+// 10 Mo (limite UPS) pèse environ 13,3 Mo une fois encodé.
+app.use(express.json({ limit: '16mb' }));
 
 app.get('/health', (req, res) => {
   res.json({
@@ -44,6 +49,10 @@ app.use('/api/shipping', shippingRouter);
 app.use('/api/address', addressRouter);
 app.use('/api/locator', locatorRouter);
 app.use('/api/diagnostic', diagnosticRouter);
+app.use('/api/transit-times', timeInTransitRouter);
+app.use('/api/landed-cost', landedCostRouter);
+app.use('/api/pickup', pickupRouter);
+app.use('/api/paperless', paperlessRouter);
 
 app.use(notFound);
 app.use(errorHandler);
