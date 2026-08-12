@@ -1,11 +1,14 @@
 import { Router } from 'express';
 import {
   listShipments,
+  listOpenShipments,
   getShipmentByTracking,
   updateStatus,
   countByStatus,
   getLabel,
 } from '../db/shipmentsRepository.js';
+import { withAnomalies, summarize } from '../services/anomalies.js';
+import { config } from '../config.js';
 import { isDbEnabled } from '../db/pool.js';
 import { trackByNumber } from '../services/tracking.js';
 import { getEvents, latestStatusByTracking } from '../services/quantumView.js';
@@ -45,7 +48,53 @@ shipmentsRouter.get(
 
     const result = await listShipments({ search, status, from, to, limit, offset });
 
-    res.json({ success: true, data: { ...result, limit, offset } });
+    // Les anomalies sont calculées à la lecture : les seuils sont
+    // configurables et un envoi peut en sortir sans réécriture en base.
+    const now = new Date();
+    const shipments = result.shipments.map((s) => withAnomalies(s, now));
+
+    res.json({
+      success: true,
+      data: {
+        ...result,
+        shipments: req.query.anomaliesOnly === 'true'
+          ? shipments.filter((s) => s.hasAnomaly)
+          : shipments,
+        limit,
+        offset,
+      },
+    });
+  }),
+);
+
+/**
+ * GET /api/shipments/anomalies — envois nécessitant une attention.
+ *
+ * Analyse tous les envois non terminés, indépendamment de la pagination
+ * de la liste principale.
+ */
+shipmentsRouter.get(
+  '/anomalies',
+  asyncHandler(async (req, res) => {
+    const open = await listOpenShipments(500);
+    const now = new Date();
+
+    const analysed = open.map((s) => withAnomalies(s, now));
+    const affected = analysed.filter((s) => s.hasAnomaly);
+
+    const type = req.query.type;
+    const filtered = type
+      ? affected.filter((s) => s.anomalies.some((a) => a.type === type))
+      : affected;
+
+    res.json({
+      success: true,
+      data: {
+        summary: summarize(open, now),
+        shipments: filtered,
+        thresholds: config.anomalies,
+      },
+    });
   }),
 );
 
@@ -87,6 +136,8 @@ shipmentsRouter.post(
           const updated = await updateStatus(trackingNumber, {
             status,
             description: pkg.currentStatus,
+            // Date du dernier événement : base du calcul « aucun mouvement ».
+            eventDate: pkg.activities[0]?.date || null,
           });
 
           return { trackingNumber, ok: true, status, description: pkg.currentStatus, shipment: updated };
@@ -137,6 +188,7 @@ shipmentsRouter.post(
       const shipment = await updateStatus(trackingNumber, {
         status: event.status,
         description: event.description,
+        eventDate: event.date,
       });
 
       if (shipment) {

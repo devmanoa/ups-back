@@ -59,6 +59,7 @@ Le serveur écoute sur `http://localhost:3000`.
 | `POST` | `/api/shipping/bulk` | Création groupée (50 expéditions max) |
 | `GET` | `/api/shipments` | Historique paginé, avec recherche et filtres |
 | `GET` | `/api/shipments/stats` | Répartition par statut |
+| `GET` | `/api/shipments/anomalies` | Envois en retard, en incident ou immobiles |
 | `POST` | `/api/shipments/refresh-status` | Actualise les statuts colis par colis (Tracking) |
 | `POST` | `/api/shipments/sync` | Actualise tous les statuts en un appel (QuantumView) |
 | `GET` | `/api/shipments/:tracking` | Détail d'un envoi enregistré |
@@ -85,6 +86,30 @@ et l'échec est journalisé. La réponse porte alors `saved: false`.
 un **abonnement Quantum View** doit être configuré sur le compte, et les événements
 ne remontent qu'à **environ 14 jours**. Les colis absents de l'historique local sont
 ignorés — QuantumView renvoie aussi les envois créés hors de cette application.
+
+### Détection d'anomalies
+
+Quatre situations sont signalées sur les envois non terminés :
+
+| Type | Déclencheur |
+|---|---|
+| `exception` | UPS signale un incident (adresse incorrecte, refus…) |
+| `delayed` | Date de livraison prévue dépassée |
+| `stalled` | Aucun événement depuis N jours alors que le colis circule |
+| `never_picked_up` | Étiquette créée mais jamais scannée par UPS |
+
+La date de livraison prévue est capturée via **Time In Transit** au moment de la
+création de l'étiquette. Si UPS ne la fournit pas, la détection retombe sur un seuil
+d'ancienneté et parle de « durée inhabituelle » plutôt que de retard.
+
+Les anomalies sont calculées **à la lecture**, jamais stockées : modifier un seuil
+prend effet immédiatement, et un envoi en sort dès qu'il repart.
+
+| Variable | Défaut | Rôle |
+|---|---|---|
+| `ANOMALY_STALLED_DAYS` | `3` | Jours sans mouvement avant signalement |
+| `ANOMALY_NEVER_PICKED_UP_DAYS` | `2` | Jours avant de signaler un colis non pris en charge |
+| `ANOMALY_FALLBACK_DELAY_DAYS` | `7` | Seuil de repli sans date prévue connue |
 
 ### Exemples
 

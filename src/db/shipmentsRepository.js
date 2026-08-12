@@ -10,7 +10,7 @@ import { query } from './pool.js';
  * Enregistre les colis d'une expédition. Un envoi multi-colis produit
  * une ligne par numéro de suivi.
  */
-export async function saveShipment({ shipment, shipTo, serviceCode, serviceName, description, labelFormat, accessPointLocationId, batchId }) {
+export async function saveShipment({ shipment, shipTo, serviceCode, serviceName, description, labelFormat, accessPointLocationId, batchId, expectedDelivery, transitDays }) {
   const rows = [];
 
   for (const pkg of shipment.packages) {
@@ -31,8 +31,8 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
          recipient_name, recipient_company, recipient_address, recipient_city,
          recipient_postal, recipient_country, reference, description,
          total_charges, currency, billing_weight, label_format, label_base64,
-         access_point_id, batch_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+         access_point_id, batch_id, expected_delivery, transit_days
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING *`,
       [
         shipment.shipmentIdentificationNumber,
@@ -54,6 +54,8 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
         pkg.label?.base64 || null,
         accessPointLocationId || null,
         batchId || null,
+        expectedDelivery || null,
+        transitDays ?? null,
       ],
     );
     rows.push(inserted[0]);
@@ -117,15 +119,38 @@ export async function getShipmentByTracking(trackingNumber) {
 }
 
 /** Met à jour le statut après interrogation de l'API Tracking. */
-export async function updateStatus(trackingNumber, { status, description }) {
+export async function updateStatus(trackingNumber, { status, description, eventDate }) {
   const { rows } = await query(
     `UPDATE shipments
-        SET status = $2, status_description = $3, status_checked_at = NOW()
+        SET status = $2,
+            status_description = $3,
+            status_checked_at = NOW(),
+            -- Date du dernier événement connu : sert à repérer les colis immobiles.
+            last_event_at = COALESCE($4::timestamptz, last_event_at),
+            -- Jalons figés au premier passage : ils ne doivent pas reculer.
+            picked_up_at = CASE
+              WHEN picked_up_at IS NULL AND $2 IN ('in_transit','delivered','exception')
+              THEN COALESCE($4::timestamptz, NOW()) ELSE picked_up_at END,
+            delivered_at = CASE
+              WHEN delivered_at IS NULL AND $2 = 'delivered'
+              THEN COALESCE($4::timestamptz, NOW()) ELSE delivered_at END
       WHERE tracking_number = $1
       RETURNING *`,
-    [trackingNumber, status, description || null],
+    [trackingNumber, status, description || null, eventDate || null],
   );
   return rows[0] ? toShipment(rows[0]) : null;
+}
+
+/** Envois non terminés, pour l'analyse d'anomalies. */
+export async function listOpenShipments(limit = 500) {
+  const { rows } = await query(
+    `SELECT * FROM shipments
+      WHERE status NOT IN ('delivered','voided')
+      ORDER BY created_at DESC
+      LIMIT $1`,
+    [limit],
+  );
+  return rows.map(toShipment);
 }
 
 /** Marque comme annulés tous les colis d'une expédition. */
@@ -177,6 +202,14 @@ function toShipment(row) {
     statusDescription: row.status_description,
     statusCheckedAt: row.status_checked_at,
     voidedAt: row.voided_at,
+    // Champs alimentant la détection d'anomalies.
+    expectedDelivery: row.expected_delivery
+      ? new Date(row.expected_delivery).toISOString().slice(0, 10)
+      : null,
+    transitDays: row.transit_days,
+    lastEventAt: row.last_event_at,
+    pickedUpAt: row.picked_up_at,
+    deliveredAt: row.delivered_at,
     batchId: row.batch_id,
     createdAt: row.created_at,
   };

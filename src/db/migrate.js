@@ -42,6 +42,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS shipments_tracking_uniq
 CREATE INDEX IF NOT EXISTS shipments_created_idx ON shipments (created_at DESC);
 CREATE INDEX IF NOT EXISTS shipments_status_idx  ON shipments (status);
 CREATE INDEX IF NOT EXISTS shipments_batch_idx   ON shipments (batch_id);
+
+-- Colonnes ajoutées après la première version : ALTER plutôt que recréation
+-- pour préserver les bases déjà déployées.
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS expected_delivery DATE;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS transit_days      INTEGER;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS last_event_at     TIMESTAMPTZ;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS picked_up_at      TIMESTAMPTZ;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivered_at      TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS shipments_expected_idx ON shipments (expected_delivery)
+  WHERE expected_delivery IS NOT NULL;
 `;
 
 export async function migrate() {

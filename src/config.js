@@ -24,6 +24,15 @@ export const config = {
   databaseUrl: (process.env.DATABASE_URL || '').trim(),
   // Les bases managées exigent TLS ; le réseau interne Coolify non.
   databaseSsl: process.env.DATABASE_SSL === 'true',
+  // Seuils de détection d'anomalies, en jours.
+  anomalies: {
+    // Colis sans aucun mouvement alors qu'il devrait circuler.
+    stalledDays: Number(process.env.ANOMALY_STALLED_DAYS) || 3,
+    // Étiquette créée mais colis jamais scanné par UPS.
+    neverPickedUpDays: Number(process.env.ANOMALY_NEVER_PICKED_UP_DAYS) || 2,
+    // Repli quand UPS n'a pas fourni de date de livraison prévue.
+    fallbackDelayDays: Number(process.env.ANOMALY_FALLBACK_DELAY_DAYS) || 7,
+  },
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
     .split(',')
     .map((o) => o.trim())

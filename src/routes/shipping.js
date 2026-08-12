@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createShipment, voidShipment, LABEL_FORMATS } from '../services/shipping.js';
 import { SERVICE_CODES } from '../services/rating.js';
+import { getTransitTimes } from '../services/timeInTransit.js';
 import { saveShipment, markVoided } from '../db/shipmentsRepository.js';
 import { isDbEnabled } from '../db/pool.js';
 import { asyncHandler, badRequest, requireFields, validatePackages } from '../middleware/validate.js';
@@ -65,14 +66,42 @@ shippingRouter.post(
 async function persistShipment(payload) {
   if (!isDbEnabled()) return false;
   try {
+    const estimate = await estimateDelivery(payload);
     await saveShipment({
       ...payload,
       serviceName: SERVICE_CODES[payload.serviceCode] || null,
+      expectedDelivery: estimate.expectedDelivery,
+      transitDays: estimate.transitDays,
     });
     return true;
   } catch (err) {
     console.error('[shipments] Enregistrement impossible :', err.message);
     return false;
+  }
+}
+
+/**
+ * Interroge Time In Transit pour connaître la date de livraison promise.
+ * Elle sert de référence à la détection de retard. Un échec est sans
+ * conséquence : l'envoi est enregistré sans date, et la détection retombe
+ * alors sur un seuil d'ancienneté.
+ */
+async function estimateDelivery({ shipTo, serviceCode, shipment }) {
+  try {
+    const weight = Number(shipment?.billingWeight?.split(' ')[0]) || 1;
+    const { services } = await getTransitTimes({ shipTo, weight });
+
+    const match =
+      services.find((s) => s.serviceCode === serviceCode) ||
+      services.find((s) => s.deliveryDate);
+
+    return {
+      expectedDelivery: match?.deliveryDate || null,
+      transitDays: match?.businessDaysInTransit ?? null,
+    };
+  } catch (err) {
+    console.warn('[shipments] Délai de livraison indisponible :', err.message);
+    return { expectedDelivery: null, transitDays: null };
   }
 }
 
