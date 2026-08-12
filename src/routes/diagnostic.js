@@ -110,6 +110,53 @@ diagnosticRouter.get(
           }),
       },
       {
+        name: 'Address Validation',
+        run: () =>
+          upsFetch(`/addressvalidation/${API_VERSIONS.addressValidation}/1`, {
+            method: 'POST',
+            body: {
+              XAVRequest: {
+                AddressKeyFormat: {
+                  PoliticalDivision2: 'Timonium',
+                  PoliticalDivision1: 'MD',
+                  PostcodePrimaryLow: '21093',
+                  CountryCode: 'US',
+                },
+                RequestOption: '1',
+              },
+            },
+          }),
+      },
+      {
+        name: 'QuantumView (synchronisation)',
+        run: () =>
+          upsFetch(`/quantumview/${API_VERSIONS.quantumView}/events`, {
+            method: 'POST',
+            body: { QuantumViewRequest: { Request: { RequestAction: 'QVEvents' } } },
+          }),
+      },
+      {
+        name: 'Time In Transit (délais)',
+        run: () =>
+          upsFetch(`/shipments/${API_VERSIONS.timeInTransit}/transittimes`, {
+            method: 'POST',
+            body: {
+              originCountryCode: 'FR',
+              originPostalCode: '75002',
+              destinationCountryCode: 'FR',
+              destinationPostalCode: '69001',
+              weight: '1',
+              weightUnitOfMeasure: 'KGS',
+              shipmentContentsValue: '10',
+              shipmentContentsCurrencyCode: 'EUR',
+              billType: '03',
+              shipDate: new Date().toISOString().slice(0, 10),
+              numberOfPackages: '1',
+              avvFlag: true,
+            },
+          }),
+      },
+      {
         name: 'Rating (tarifs)',
         run: () =>
           upsFetch(`/rating/${API_VERSIONS.rating}/Shop`, {
@@ -134,22 +181,25 @@ diagnosticRouter.get(
       },
     ];
 
-    const results = [];
-    for (const probe of probes) {
-      try {
-        await probe.run();
-        results.push({ api: probe.name, ok: true });
-      } catch (err) {
-        results.push({
-          api: probe.name,
-          ok: false,
-          status: err.status,
-          code: err.code,
-          upsCodes: err.upsCodes || [],
-          error: err.message,
-        });
-      }
-    }
+    // Les sondes sont indépendantes : en série, cinq appels UPS risqueraient
+    // de dépasser le délai d'attente du client.
+    const results = await Promise.all(
+      probes.map(async (probe) => {
+        try {
+          await probe.run();
+          return { api: probe.name, ok: true };
+        } catch (err) {
+          return {
+            api: probe.name,
+            ok: false,
+            status: err.status,
+            code: err.code,
+            upsCodes: err.upsCodes || [],
+            error: err.message,
+          };
+        }
+      }),
+    );
 
     steps.push({ step: '3. Appels API', results });
 
@@ -163,11 +213,18 @@ diagnosticRouter.get(
         'Le jeton est obtenu mais toutes les APIs le refusent. ' +
         `Vérifiez que l'environnement "${config.env}" correspond bien à celui de vos identifiants.`;
     } else {
+      // Le code 250002 signifie « API non autorisée », malgré son libellé
+      // trompeur « Invalid Authentication Information ».
+      const notSubscribed = failed.filter((f) => f.upsCodes?.includes('250002'));
+
       conclusion =
-        `Le jeton fonctionne et certaines APIs répondent, mais ${failed
-          .map((f) => f.api)
-          .join(', ')} échoue. ` +
-        "Cette API n'est probablement pas ajoutée à votre application sur developer.ups.com.";
+        notSubscribed.length > 0
+          ? `Le jeton fonctionne, mais ${notSubscribed.length} API(s) sont refusées : ` +
+            `${notSubscribed.map((f) => f.api).join(', ')}. ` +
+            `Ajoutez-les à votre application sur developer.ups.com (Edit App), ` +
+            `puis redémarrez le backend pour renouveler le jeton.`
+          : `Le jeton fonctionne, mais ${failed.map((f) => f.api).join(', ')} échoue. ` +
+            `Consultez le détail de chaque appel ci-dessous.`;
     }
 
     res.json({ success: failed.length === 0, conclusion, steps });
