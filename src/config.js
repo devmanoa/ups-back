@@ -20,6 +20,10 @@ export const config = {
   clientSecret: (process.env.UPS_CLIENT_SECRET || '').trim(),
   accountNumber: (process.env.UPS_ACCOUNT_NUMBER || '').trim(),
   port: Number(process.env.PORT) || 3000,
+  // Sans DATABASE_URL, l'application fonctionne mais sans historique d'envois.
+  databaseUrl: (process.env.DATABASE_URL || '').trim(),
+  // Les bases managées exigent TLS ; le réseau interne Coolify non.
+  databaseSsl: process.env.DATABASE_SSL === 'true',
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
     .split(',')
     .map((o) => o.trim())

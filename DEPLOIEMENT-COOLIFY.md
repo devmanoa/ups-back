@@ -45,6 +45,8 @@ UPS_ENV=test
 NODE_ENV=production
 PORT=3000
 CORS_ORIGIN=https://ups.mondomaine.fr
+DATABASE_URL=postgresql://user:password@hote:5432/ups
+DATABASE_SSL=false
 SHIPPER_NAME=Ma Societe
 SHIPPER_ATTENTION_NAME=Service Expedition
 SHIPPER_PHONE=0102030405
@@ -59,6 +61,23 @@ SHIPPER_COUNTRY=FR
 > se charge mais tous les appels sont bloqués par le navigateur.
 >
 > Passez `UPS_ENV=production` seulement après validation en environnement de test.
+
+---
+
+### Base PostgreSQL
+
+La page « Envois en cours » nécessite une base : UPS ne permet pas de relire les
+expéditions déjà créées.
+
+Dans Coolify : **New Resource → Database → PostgreSQL**. Une fois créée, copiez son
+URL de connexion interne dans `DATABASE_URL` du backend. Le schéma est créé
+automatiquement au premier démarrage, aucune migration manuelle n'est nécessaire.
+
+Laissez `DATABASE_SSL=false` pour une base Coolify (réseau interne) ; passez à `true`
+pour une base managée externe (Neon, Supabase…).
+
+> Sans `DATABASE_URL`, le reste de l'application fonctionne normalement : seules les
+> pages « Envois en cours » et « Envoi groupé » sont inopérantes.
 
 ---
 

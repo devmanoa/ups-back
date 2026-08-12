@@ -23,6 +23,8 @@ Le serveur écoute sur `http://localhost:3000`.
 | `UPS_CLIENT_SECRET` | oui | Client Secret associé |
 | `UPS_ACCOUNT_NUMBER` | pour Shipping | Numéro de compte UPS (6 caractères). Nécessaire aussi pour les tarifs négociés |
 | `UPS_ENV` | non | `test` (défaut, CIE) ou `production` |
+| `DATABASE_URL` | pour l'historique | Connexion PostgreSQL. Vide → page « Envois en cours » désactivée |
+| `DATABASE_SSL` | non | `true` pour une base managée exigeant TLS |
 | `PORT` | non | Port d'écoute (défaut `3000`) |
 | `CORS_ORIGIN` | non | Origines autorisées, séparées par des virgules (défaut `http://localhost:5173`) |
 | `SHIPPER_*` | pour Shipping | Adresse expéditeur par défaut |
@@ -54,6 +56,22 @@ Le serveur écoute sur `http://localhost:3000`.
 | `GET` | `/api/paperless/document-types` | Types de documents douaniers |
 | `POST` | `/api/paperless/upload` | Téléversement d'un document douanier |
 | `POST` | `/api/paperless/link` | Rattachement d'un document à une expédition |
+| `POST` | `/api/shipping/bulk` | Création groupée (50 expéditions max) |
+| `GET` | `/api/shipments` | Historique paginé, avec recherche et filtres |
+| `GET` | `/api/shipments/stats` | Répartition par statut |
+| `POST` | `/api/shipments/refresh-status` | Actualise les statuts depuis l'API Tracking |
+| `GET` | `/api/shipments/:tracking` | Détail d'un envoi enregistré |
+| `GET` | `/api/shipments/:tracking/label` | Étiquette stockée, en base64 |
+
+### Historique des envois
+
+UPS ne fournit **aucune API** permettant de relire la liste des expéditions créées.
+Chaque envoi est donc enregistré en base au moment de sa création, ce qui alimente la
+page « Envois en cours ».
+
+L'enregistrement ne peut jamais faire échouer une expédition : si la base est
+indisponible, l'étiquette est tout de même retournée (elle est déjà facturée par UPS)
+et l'échec est journalisé. La réponse porte alors `saved: false`.
 
 ### Exemples
 

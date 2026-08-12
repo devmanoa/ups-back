@@ -1,0 +1,130 @@
+import { Router } from 'express';
+import {
+  listShipments,
+  getShipmentByTracking,
+  updateStatus,
+  countByStatus,
+  getLabel,
+} from '../db/shipmentsRepository.js';
+import { isDbEnabled } from '../db/pool.js';
+import { trackByNumber } from '../services/tracking.js';
+import { asyncHandler, badRequest } from '../middleware/validate.js';
+
+export const shipmentsRouter = Router();
+
+/** Statuts internes, distincts des libellés UPS. */
+const STATUSES = ['created', 'in_transit', 'delivered', 'exception', 'voided'];
+
+/**
+ * Déduit un statut interne à partir du libellé UPS.
+ * Les codes UPS varient selon le service : on s'appuie sur le type d'activité
+ * quand il est présent, sinon sur le libellé.
+ */
+function deriveStatus(currentStatus, statusCode) {
+  const text = (currentStatus || '').toLowerCase();
+
+  if (statusCode === '011' || /livr|deliver/.test(text)) return 'delivered';
+  if (/exception|retard|echec|échec|refus/.test(text)) return 'exception';
+  if (/transit|achemin|sortie|charg|scan|collect|pris en charge/.test(text)) return 'in_transit';
+  return 'created';
+}
+
+/** GET /api/shipments — liste paginée avec recherche et filtres */
+shipmentsRouter.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    const { search, status, from, to } = req.query;
+
+    if (status && status !== 'all' && !STATUSES.includes(status)) {
+      throw badRequest(`status invalide. Valeurs acceptées : all, ${STATUSES.join(', ')}`);
+    }
+
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+
+    const result = await listShipments({ search, status, from, to, limit, offset });
+
+    res.json({ success: true, data: { ...result, limit, offset } });
+  }),
+);
+
+/** GET /api/shipments/stats — répartition par statut */
+shipmentsRouter.get(
+  '/stats',
+  asyncHandler(async (req, res) => {
+    const counts = await countByStatus();
+    res.json({ success: true, data: { counts, dbEnabled: isDbEnabled() } });
+  }),
+);
+
+/**
+ * POST /api/shipments/refresh-status — met à jour les statuts depuis UPS.
+ *
+ * Les envois déjà livrés ou annulés ne sont pas réinterrogés : leur statut
+ * est définitif, et chaque appel consomme du quota UPS.
+ */
+shipmentsRouter.post(
+  '/refresh-status',
+  asyncHandler(async (req, res) => {
+    const { trackingNumbers } = req.body;
+
+    if (!Array.isArray(trackingNumbers) || trackingNumbers.length === 0) {
+      throw badRequest('Le champ "trackingNumbers" doit contenir au moins un numéro.');
+    }
+    if (trackingNumbers.length > 50) {
+      throw badRequest('50 numéros de suivi maximum par appel.');
+    }
+
+    const results = await Promise.all(
+      trackingNumbers.map(async (trackingNumber) => {
+        try {
+          const tracking = await trackByNumber(trackingNumber);
+          const pkg = tracking.packages[0];
+          if (!pkg) return { trackingNumber, ok: false, error: 'Colis introuvable chez UPS' };
+
+          const status = deriveStatus(pkg.currentStatus, pkg.currentStatusCode);
+          const updated = await updateStatus(trackingNumber, {
+            status,
+            description: pkg.currentStatus,
+          });
+
+          return { trackingNumber, ok: true, status, description: pkg.currentStatus, shipment: updated };
+        } catch (err) {
+          return { trackingNumber, ok: false, error: err.message };
+        }
+      }),
+    );
+
+    res.json({ success: true, data: { results } });
+  }),
+);
+
+/** GET /api/shipments/:trackingNumber/label — récupère l'étiquette stockée */
+shipmentsRouter.get(
+  '/:trackingNumber/label',
+  asyncHandler(async (req, res) => {
+    const label = await getLabel(req.params.trackingNumber);
+    if (!label) {
+      throw Object.assign(new Error('Aucune étiquette enregistrée pour ce colis.'), {
+        status: 404,
+        code: 'LABEL_NOT_FOUND',
+      });
+    }
+    res.json({ success: true, data: label });
+  }),
+);
+
+/** GET /api/shipments/:trackingNumber — détail d'un envoi */
+shipmentsRouter.get(
+  '/:trackingNumber',
+  asyncHandler(async (req, res) => {
+    const shipment = await getShipmentByTracking(req.params.trackingNumber);
+    if (!shipment) {
+      throw Object.assign(new Error('Envoi introuvable dans l’historique.'), {
+        status: 404,
+        code: 'SHIPMENT_NOT_FOUND',
+      });
+    }
+    res.json({ success: true, data: shipment });
+  }),
+);

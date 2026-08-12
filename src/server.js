@@ -12,6 +12,8 @@ import { timeInTransitRouter } from './routes/timeInTransit.js';
 import { landedCostRouter } from './routes/landedCost.js';
 import { pickupRouter } from './routes/pickup.js';
 import { paperlessRouter } from './routes/paperless.js';
+import { shipmentsRouter } from './routes/shipments.js';
+import { migrate } from './db/migrate.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { asyncHandler } from './middleware/validate.js';
 
@@ -53,9 +55,14 @@ app.use('/api/transit-times', timeInTransitRouter);
 app.use('/api/landed-cost', landedCostRouter);
 app.use('/api/pickup', pickupRouter);
 app.use('/api/paperless', paperlessRouter);
+app.use('/api/shipments', shipmentsRouter);
 
 app.use(notFound);
 app.use(errorHandler);
+
+// La migration est lancée avant l'écoute, mais son échec n'empêche pas le
+// démarrage : sans base, seul l'historique des envois est indisponible.
+await migrate();
 
 // 0.0.0.0 est indispensable en conteneur : sur localhost, le port ne serait
 // pas joignable depuis l'extérieur du conteneur.
