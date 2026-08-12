@@ -59,7 +59,8 @@ Le serveur écoute sur `http://localhost:3000`.
 | `POST` | `/api/shipping/bulk` | Création groupée (50 expéditions max) |
 | `GET` | `/api/shipments` | Historique paginé, avec recherche et filtres |
 | `GET` | `/api/shipments/stats` | Répartition par statut |
-| `POST` | `/api/shipments/refresh-status` | Actualise les statuts depuis l'API Tracking |
+| `POST` | `/api/shipments/refresh-status` | Actualise les statuts colis par colis (Tracking) |
+| `POST` | `/api/shipments/sync` | Actualise tous les statuts en un appel (QuantumView) |
 | `GET` | `/api/shipments/:tracking` | Détail d'un envoi enregistré |
 | `GET` | `/api/shipments/:tracking/label` | Étiquette stockée, en base64 |
 
@@ -72,6 +73,18 @@ page « Envois en cours ».
 L'enregistrement ne peut jamais faire échouer une expédition : si la base est
 indisponible, l'étiquette est tout de même retournée (elle est déjà facturée par UPS)
 et l'échec est journalisé. La réponse porte alors `saved: false`.
+
+### Deux façons d'actualiser les statuts
+
+| Route | Mécanisme | Quand l'utiliser |
+|---|---|---|
+| `/refresh-status` | API Tracking, **un appel par colis** | Quelques envois, ou un colis précis |
+| `/sync` | API QuantumView, **un seul appel** | Beaucoup d'envois à mettre à jour |
+
+`/sync` est nettement plus économe en quota, mais impose deux contraintes UPS :
+un **abonnement Quantum View** doit être configuré sur le compte, et les événements
+ne remontent qu'à **environ 14 jours**. Les colis absents de l'historique local sont
+ignorés — QuantumView renvoie aussi les envois créés hors de cette application.
 
 ### Exemples
 

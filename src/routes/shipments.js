@@ -8,6 +8,7 @@ import {
 } from '../db/shipmentsRepository.js';
 import { isDbEnabled } from '../db/pool.js';
 import { trackByNumber } from '../services/tracking.js';
+import { getEvents, latestStatusByTracking } from '../services/quantumView.js';
 import { asyncHandler, badRequest } from '../middleware/validate.js';
 
 export const shipmentsRouter = Router();
@@ -96,6 +97,66 @@ shipmentsRouter.post(
     );
 
     res.json({ success: true, data: { results } });
+  }),
+);
+
+/**
+ * POST /api/shipments/sync — actualise les statuts via QuantumView.
+ *
+ * Un seul appel UPS rapporte les événements de tous les colis récents,
+ * là où /refresh-status interroge le Tracking colis par colis.
+ *
+ * Contreparties : un abonnement Quantum View doit être configuré sur le
+ * compte, et l'historique ne remonte qu'à environ 14 jours.
+ */
+shipmentsRouter.post(
+  '/sync',
+  asyncHandler(async (req, res) => {
+    const { subscriptionName, maxPages = 5 } = req.body || {};
+
+    const pages = Math.min(Math.max(Number(maxPages) || 1, 1), 20);
+    const allEvents = [];
+    let bookmark;
+    let pagesRead = 0;
+
+    // UPS pagine par fichiers : on suit le bookmark jusqu'à épuisement.
+    do {
+      const page = await getEvents({ subscriptionName, bookmark });
+      allEvents.push(...page.events);
+      bookmark = page.bookmark;
+      pagesRead += 1;
+    } while (bookmark && pagesRead < pages);
+
+    const latest = latestStatusByTracking(allEvents);
+    const updated = [];
+    const ignored = [];
+
+    for (const [trackingNumber, event] of latest) {
+      // Seuls les colis présents dans l'historique local sont mis à jour :
+      // QuantumView renvoie aussi des envois créés hors de cette application.
+      const shipment = await updateStatus(trackingNumber, {
+        status: event.status,
+        description: event.description,
+      });
+
+      if (shipment) {
+        updated.push({ trackingNumber, status: event.status, description: event.description });
+      } else {
+        ignored.push(trackingNumber);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        eventsRead: allEvents.length,
+        pagesRead,
+        hasMore: Boolean(bookmark),
+        updated: updated.length,
+        ignored: ignored.length,
+        details: updated,
+      },
+    });
   }),
 );
 

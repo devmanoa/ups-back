@@ -54,6 +54,7 @@ export const API_VERSIONS = {
   timeInTransit: 'v1',
   landedCost: 'v1',
   paperless: 'v2',
+  quantumView: 'v3',
 };
 
 export function assertCredentials() {
