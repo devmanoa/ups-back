@@ -129,8 +129,18 @@ shipmentsRouter.post(
       trackingNumbers.map(async (trackingNumber) => {
         try {
           const tracking = await trackByNumber(trackingNumber);
-          const pkg = tracking.packages[0];
-          if (!pkg) return { trackingNumber, ok: false, error: 'Colis introuvable chez UPS' };
+
+          // UPS renvoie un colis de démonstration lorsque le numéro n'existe
+          // pas : sans ce contrôle, on écrirait en base le statut d'un autre
+          // colis. On retient donc uniquement une correspondance exacte.
+          const wanted = trackingNumber.replace(/\s+/g, '').toUpperCase();
+          const pkg = tracking.packages.find(
+            (p) => (p.trackingNumber || '').replace(/\s+/g, '').toUpperCase() === wanted,
+          );
+
+          if (!pkg) {
+            return { trackingNumber, ok: false, error: 'Colis introuvable chez UPS' };
+          }
 
           const status = deriveStatus(pkg.currentStatus, pkg.currentStatusCode);
           const updated = await updateStatus(trackingNumber, {
