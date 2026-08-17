@@ -93,6 +93,24 @@ function formatHours(opHours) {
   });
 }
 
+/** UPS renvoie tantôt un objet, tantôt un tableau selon le nombre d'éléments. */
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * Les horaires texte d'UPS sont une chaîne séparée par des points-virgules,
+ * par exemple « Lundi 9:00-19:00;Mardi 9:00-19:00 ».
+ */
+function parseHoursText(text) {
+  if (!text) return [];
+  return String(text)
+    .split(';')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function normalizeLocations(data) {
   const found = data?.LocatorResponse?.SearchResults?.DropLocation;
   if (!found) return { locations: [], raw: data };
@@ -127,6 +145,34 @@ function normalizeLocations(data) {
       isAccessPoint: Boolean(loc.AccessPointInformation),
       accessPointStatus: loc.AccessPointInformation?.AccessPointStatus?.Description || null,
       openingHours: formatHours(loc.OperatingHours),
+
+      // Photo de la façade : aide l'utilisateur à repérer le commerce.
+      imageUrl: loc.AccessPointInformation?.ImageURL || null,
+      // Identifiant public, distinct du LocationID : c'est celui à
+      // communiquer au destinataire.
+      publicAccessPointId: loc.AccessPointInformation?.PublicAccessPointID || null,
+
+      // Horaires en texte libre, plus complets que la grille structurée
+      // quand UPS ne renseigne pas cette dernière.
+      hoursText: parseHoursText(loc.StandardHoursOfOperation),
+
+      services: asArray(loc.ServiceOfferingList?.ServiceOffering)
+        .map((s) => s.Description || s.Code)
+        .filter(Boolean),
+
+      // Indications d'accès : étage, entrée, précisions de localisation.
+      // AdditionalComments peut arriver en objet ou en tableau.
+      comments:
+        [
+          loc.Comments,
+          ...asArray(loc.AdditionalComments).map((c) => c?.CommentType?.Text || c?.Text),
+        ]
+          .filter(Boolean)
+          .join(' — ') || null,
+
+      promotions: asArray(loc.PromotionInformation)
+        .map((p) => p.Promotion)
+        .filter(Boolean),
     };
   });
 
