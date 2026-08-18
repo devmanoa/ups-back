@@ -4,8 +4,43 @@ import { upsFetch } from './upsClient.js';
 const V = API_VERSIONS.tracking;
 
 /**
+ * Forme canonique d'un numéro de suivi pour comparaison : seuls les
+ * caractères alphanumériques identifient un colis, les séparateurs
+ * (espaces, tirets, points) collés depuis un e-mail ou une facture
+ * ne doivent pas faire échouer la correspondance.
+ */
+export function normalizeTrackingNumber(value) {
+  return String(value ?? '').replace(/[^0-9a-z]/gi, '').toUpperCase();
+}
+
+/**
+ * Retrouve, parmi les colis d'une réponse, celui qui correspond au numéro
+ * interrogé. La correspondance accepte deux formes :
+ * - le numéro du colis lui-même ;
+ * - l'inquiryNumber de son envoi — UPS y renvoie le numéro interrogé quand
+ *   le colis porte un alias (Mail Innovations) ou aucun numéro propre.
+ *
+ * Les réponses de démonstration (renvoyées pour un numéro inexistant)
+ * portent leur propre numéro aux deux niveaux — vérifié sur l'API réelle —
+ * et ne correspondent donc jamais.
+ */
+export function findMatchingPackage(packages, inquiryNumber) {
+  const wanted = normalizeTrackingNumber(inquiryNumber);
+  if (!wanted) return undefined;
+  return packages.find(
+    (p) =>
+      normalizeTrackingNumber(p.trackingNumber) === wanted ||
+      normalizeTrackingNumber(p.shipmentInquiryNumber) === wanted,
+  );
+}
+
+/**
  * Suit un colis par son numéro de tracking (1Z...).
  * GET /api/track/v1/details/{inquiryNumber}
+ *
+ * En plus des colis, la réponse porte `matched` : faux quand UPS a répondu
+ * pour un autre numéro (colis de démonstration) — chaque consommateur n'a
+ * ainsi pas à redécouvrir ce piège.
  */
 export async function trackByNumber(inquiryNumber, { locale = 'fr_FR', returnSignature = false } = {}) {
   const data = await upsFetch(`/track/${V}/details/${encodeURIComponent(inquiryNumber)}`, {
@@ -15,7 +50,13 @@ export async function trackByNumber(inquiryNumber, { locale = 'fr_FR', returnSig
       returnMilestones: 'true',
     },
   });
-  return normalizeTracking(data);
+
+  const result = normalizeTracking(data);
+  return {
+    ...result,
+    queriedNumber: inquiryNumber,
+    matched: Boolean(findMatchingPackage(result.packages, inquiryNumber)),
+  };
 }
 
 /**
@@ -68,7 +109,11 @@ function normalizeTracking(data) {
       const delivery = (pkg.deliveryDate || []).find((d) => d.type === 'DEL') || pkg.deliveryDate?.[0];
 
       return {
-        trackingNumber: pkg.trackingNumber,
+        // Repli sur le numéro d'envoi : UPS omet parfois le numéro par-colis
+        // (Mail Innovations, réponses par référence).
+        trackingNumber: pkg.trackingNumber || shipment.inquiryNumber || '',
+        // Conservé pour la correspondance par alias (cf. findMatchingPackage).
+        shipmentInquiryNumber: shipment.inquiryNumber || '',
         currentStatus: pkg.currentStatus?.description || activities[0]?.status || 'Inconnu',
         currentStatusCode: pkg.currentStatus?.code || '',
         service: pkg.service?.description || '',

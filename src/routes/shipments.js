@@ -10,7 +10,7 @@ import {
 import { withAnomalies, summarize } from '../services/anomalies.js';
 import { config } from '../config.js';
 import { isDbEnabled } from '../db/pool.js';
-import { trackByNumber } from '../services/tracking.js';
+import { trackByNumber, findMatchingPackage } from '../services/tracking.js';
 import { getEvents, latestStatusByTracking } from '../services/quantumView.js';
 import { asyncHandler, badRequest } from '../middleware/validate.js';
 
@@ -124,6 +124,12 @@ shipmentsRouter.post(
     if (trackingNumbers.length > 50) {
       throw badRequest('50 numéros de suivi maximum par appel.');
     }
+    // Validé avant tout appel UPS : un élément non-chaîne lèverait un
+    // TypeError après avoir consommé du quota, avec un message interne
+    // exposé au client.
+    if (trackingNumbers.some((t) => typeof t !== 'string' || !t.trim())) {
+      throw badRequest('Chaque élément de "trackingNumbers" doit être une chaîne non vide.');
+    }
 
     const results = await Promise.all(
       trackingNumbers.map(async (trackingNumber) => {
@@ -132,14 +138,18 @@ shipmentsRouter.post(
 
           // UPS renvoie un colis de démonstration lorsque le numéro n'existe
           // pas : sans ce contrôle, on écrirait en base le statut d'un autre
-          // colis. On retient donc uniquement une correspondance exacte.
-          const wanted = trackingNumber.replace(/\s+/g, '').toUpperCase();
-          const pkg = tracking.packages.find(
-            (p) => (p.trackingNumber || '').replace(/\s+/g, '').toUpperCase() === wanted,
-          );
+          // colis. La correspondance (numéro du colis ou alias via
+          // l'inquiryNumber de l'envoi) est portée par le service.
+          const pkg = findMatchingPackage(tracking.packages, trackingNumber);
 
           if (!pkg) {
-            return { trackingNumber, ok: false, error: 'Colis introuvable chez UPS' };
+            return {
+              trackingNumber,
+              ok: false,
+              // Distinct d'une panne UPS : le numéro est inconnu et UPS a
+              // répondu avec un colis de démonstration.
+              error: 'UPS a répondu pour un autre numéro — vérifiez le numéro, statut non modifié',
+            };
           }
 
           const status = deriveStatus(pkg.currentStatus, pkg.currentStatusCode);
