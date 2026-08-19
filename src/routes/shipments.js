@@ -33,6 +33,44 @@ function deriveStatus(currentStatus, statusCode) {
   return 'created';
 }
 
+/**
+ * Actualise un envoi via l'API Tracking et enregistre le nouveau statut.
+ * Partagé entre /refresh-status (page affichée) et le repli de /sync.
+ */
+async function refreshOneViaTracking(trackingNumber) {
+  try {
+    const tracking = await trackByNumber(trackingNumber);
+
+    // UPS renvoie un colis de démonstration lorsque le numéro n'existe
+    // pas : sans ce contrôle, on écrirait en base le statut d'un autre
+    // colis. La correspondance (numéro du colis ou alias via
+    // l'inquiryNumber de l'envoi) est portée par le service.
+    const pkg = findMatchingPackage(tracking.packages, trackingNumber);
+
+    if (!pkg) {
+      return {
+        trackingNumber,
+        ok: false,
+        // Distinct d'une panne UPS : le numéro est inconnu et UPS a
+        // répondu avec un colis de démonstration.
+        error: 'UPS a répondu pour un autre numéro — vérifiez le numéro, statut non modifié',
+      };
+    }
+
+    const status = deriveStatus(pkg.currentStatus, pkg.currentStatusCode);
+    const updated = await updateStatus(trackingNumber, {
+      status,
+      description: pkg.currentStatus,
+      // Date du dernier événement : base du calcul « aucun mouvement ».
+      eventDate: pkg.activities[0]?.date || null,
+    });
+
+    return { trackingNumber, ok: true, status, description: pkg.currentStatus, shipment: updated };
+  } catch (err) {
+    return { trackingNumber, ok: false, error: err.message };
+  }
+}
+
 /** GET /api/shipments — liste paginée avec recherche et filtres */
 shipmentsRouter.get(
   '/',
@@ -131,45 +169,28 @@ shipmentsRouter.post(
       throw badRequest('Chaque élément de "trackingNumbers" doit être une chaîne non vide.');
     }
 
-    const results = await Promise.all(
-      trackingNumbers.map(async (trackingNumber) => {
-        try {
-          const tracking = await trackByNumber(trackingNumber);
-
-          // UPS renvoie un colis de démonstration lorsque le numéro n'existe
-          // pas : sans ce contrôle, on écrirait en base le statut d'un autre
-          // colis. La correspondance (numéro du colis ou alias via
-          // l'inquiryNumber de l'envoi) est portée par le service.
-          const pkg = findMatchingPackage(tracking.packages, trackingNumber);
-
-          if (!pkg) {
-            return {
-              trackingNumber,
-              ok: false,
-              // Distinct d'une panne UPS : le numéro est inconnu et UPS a
-              // répondu avec un colis de démonstration.
-              error: 'UPS a répondu pour un autre numéro — vérifiez le numéro, statut non modifié',
-            };
-          }
-
-          const status = deriveStatus(pkg.currentStatus, pkg.currentStatusCode);
-          const updated = await updateStatus(trackingNumber, {
-            status,
-            description: pkg.currentStatus,
-            // Date du dernier événement : base du calcul « aucun mouvement ».
-            eventDate: pkg.activities[0]?.date || null,
-          });
-
-          return { trackingNumber, ok: true, status, description: pkg.currentStatus, shipment: updated };
-        } catch (err) {
-          return { trackingNumber, ok: false, error: err.message };
-        }
-      }),
-    );
+    const results = await Promise.all(trackingNumbers.map(refreshOneViaTracking));
 
     res.json({ success: true, data: { results } });
   }),
 );
+
+/**
+ * Codes UPS signifiant « QuantumView inutilisable en l'état » :
+ * - 250002 : API non souscrite par l'application (developer.ups.com) ;
+ * - 330052 : abonnements Quantum View Data inactifs sur le compte.
+ * Dans les deux cas, l'API Tracking reste fonctionnelle : on bascule dessus
+ * plutôt que de renvoyer une erreur à l'utilisateur.
+ */
+const QVD_UNAVAILABLE_CODES = new Set(['250002', '330052']);
+
+function isQvdUnavailable(err) {
+  const codes = [err.code, ...(err.upsCodes || [])].filter(Boolean).map(String);
+  return codes.some((c) => QVD_UNAVAILABLE_CODES.has(c));
+}
+
+/** Nombre maximal d'appels Tracking par synchronisation de repli. */
+const TRACKING_FALLBACK_LIMIT = 50;
 
 /**
  * POST /api/shipments/sync — actualise les statuts via QuantumView.
@@ -177,8 +198,10 @@ shipmentsRouter.post(
  * Un seul appel UPS rapporte les événements de tous les colis récents,
  * là où /refresh-status interroge le Tracking colis par colis.
  *
- * Contreparties : un abonnement Quantum View doit être configuré sur le
- * compte, et l'historique ne remonte qu'à environ 14 jours.
+ * Contreparties : un abonnement Quantum View Data doit être actif sur le
+ * compte, et l'historique ne remonte qu'à environ 14 jours. Tant que ce
+ * n'est pas le cas, la route bascule d'elle-même sur l'API Tracking pour
+ * les envois ouverts (`mode: 'tracking'` dans la réponse).
  */
 shipmentsRouter.post(
   '/sync',
@@ -190,13 +213,52 @@ shipmentsRouter.post(
     let bookmark;
     let pagesRead = 0;
 
-    // UPS pagine par fichiers : on suit le bookmark jusqu'à épuisement.
-    do {
-      const page = await getEvents({ subscriptionName, bookmark });
-      allEvents.push(...page.events);
-      bookmark = page.bookmark;
-      pagesRead += 1;
-    } while (bookmark && pagesRead < pages);
+    try {
+      // UPS pagine par fichiers : on suit le bookmark jusqu'à épuisement.
+      do {
+        const page = await getEvents({ subscriptionName, bookmark });
+        allEvents.push(...page.events);
+        bookmark = page.bookmark;
+        pagesRead += 1;
+      } while (bookmark && pagesRead < pages);
+    } catch (err) {
+      if (!isQvdUnavailable(err)) throw err;
+
+      // Repli : Tracking colis par colis sur les envois encore ouverts.
+      // Plus coûteux en quota (un appel par colis), donc plafonné.
+      const open = await listOpenShipments(TRACKING_FALLBACK_LIMIT + 1);
+      const numbers = open
+        .map((s) => s.trackingNumber)
+        .filter(Boolean)
+        .slice(0, TRACKING_FALLBACK_LIMIT);
+
+      const results = await Promise.all(numbers.map(refreshOneViaTracking));
+      const updated = results.filter((r) => r.ok);
+      const failed = results.filter((r) => !r.ok);
+
+      res.json({
+        success: true,
+        data: {
+          mode: 'tracking',
+          fallbackReason: err.message,
+          checked: numbers.length,
+          updated: updated.length,
+          failed: failed.length,
+          hasMore: open.length > TRACKING_FALLBACK_LIMIT,
+          details: updated.map(({ trackingNumber, status, description }) => ({
+            trackingNumber,
+            status,
+            description,
+          })),
+          failures: failed.map(({ trackingNumber, error }) => ({ trackingNumber, error })),
+          // Champs QuantumView, neutres, pour un front pas encore à jour.
+          eventsRead: 0,
+          pagesRead: 0,
+          ignored: 0,
+        },
+      });
+      return;
+    }
 
     const latest = latestStatusByTracking(allEvents);
     const updated = [];
@@ -221,6 +283,7 @@ shipmentsRouter.post(
     res.json({
       success: true,
       data: {
+        mode: 'quantumview',
         eventsRead: allEvents.length,
         pagesRead,
         hasMore: Boolean(bookmark),
