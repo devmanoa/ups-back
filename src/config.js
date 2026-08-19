@@ -57,7 +57,6 @@ export const API_VERSIONS = {
   tracking: 'v1',
   rating: 'v2409',
   shipping: 'v2409',
-  addressValidation: 'v2',
   locator: 'v3',
   pickup: 'v2409',
   timeInTransit: 'v1',

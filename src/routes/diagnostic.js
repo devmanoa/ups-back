@@ -110,24 +110,6 @@ diagnosticRouter.get(
           }),
       },
       {
-        name: 'Address Validation',
-        run: () =>
-          upsFetch(`/addressvalidation/${API_VERSIONS.addressValidation}/1`, {
-            method: 'POST',
-            body: {
-              XAVRequest: {
-                AddressKeyFormat: {
-                  PoliticalDivision2: 'Timonium',
-                  PoliticalDivision1: 'MD',
-                  PostcodePrimaryLow: '21093',
-                  CountryCode: 'US',
-                },
-                RequestOption: '1',
-              },
-            },
-          }),
-      },
-      {
         name: 'QuantumView (synchronisation)',
         run: () =>
           upsFetch(`/quantumview/${API_VERSIONS.quantumView}/events`, {

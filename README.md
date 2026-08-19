@@ -1,7 +1,7 @@
 # UPS Backend
 
 API Node.js/Express qui encapsule les APIs REST UPS : suivi de colis, calcul de tarifs,
-création d'étiquettes, validation d'adresse et recherche de points relais.
+création d'étiquettes et recherche de points relais.
 
 Les identifiants UPS restent côté serveur — le frontend ne les voit jamais.
 
@@ -45,7 +45,6 @@ Le serveur écoute sur `http://localhost:3000`.
 | `POST` | `/api/rating` | Calcul de tarifs |
 | `POST` | `/api/shipping` | Création d'expédition + étiquette |
 | `DELETE` | `/api/shipping/:shipmentId` | Annulation d'une expédition |
-| `POST` | `/api/address/validate` | Validation d'adresse (US/PR uniquement) |
 | `POST` | `/api/locator/access-points` | Recherche de points relais |
 | `GET` | `/api/diagnostic` | Teste chaque étape (config, jeton, APIs) et localise une panne |
 | `POST` | `/api/transit-times` | Délais de livraison estimés |
@@ -183,7 +182,6 @@ src/
 │   ├── tracking.js        Suivi
 │   ├── rating.js          Tarifs
 │   ├── shipping.js        Étiquettes
-│   ├── addressValidation.js
 │   └── locator.js         Points relais
 ├── routes/                Routes Express + validation d'entrée
 └── middleware/            Validation et gestion d'erreurs
@@ -196,7 +194,7 @@ avant expiration ; les appels concurrents partagent la même requête de renouve
 
 Figées d'après les specs OpenAPI officielles
 ([UPS-API/api-documentation](https://github.com/UPS-API/api-documentation)) :
-Tracking `v1`, Rating `v2409`, Shipping `v2409`, Address Validation `v2`, Locator `v3`.
+Tracking `v1`, Rating `v2409`, Shipping `v2409`, Locator `v3`.
 
 ## Déploiement (Docker / Coolify)
 
@@ -213,6 +211,5 @@ par le navigateur.
 
 ## Limites connues
 
-- **Validation d'adresse** : l'API UPS ne couvre que les États-Unis et Porto Rico.
 - **Shipping** : nécessite `UPS_ACCOUNT_NUMBER` et une adresse expéditeur complète.
 - **Tarifs négociés** : renvoyés uniquement si le compte UPS en dispose.
