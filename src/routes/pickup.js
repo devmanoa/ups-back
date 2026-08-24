@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createPickup, cancelPickup, CONTAINER_CODES } from '../services/pickup.js';
+import { createPickup, cancelPickup, CONTAINER_CODES, MAX_TRACKING_NUMBERS } from '../services/pickup.js';
 import { asyncHandler, badRequest, requireFields } from '../middleware/validate.js';
 import { log, ACTIONS } from '../services/activity.js';
 
@@ -28,6 +28,7 @@ pickupRouter.post(
       phone,
       pickupPoint,
       residential,
+      trackingNumbers,
     } = req.body;
 
     if (!address) throw badRequest('Le champ "address" est obligatoire.');
@@ -49,6 +50,30 @@ pickupRouter.post(
       }
     });
 
+    // Numéros de suivi rattachés : facultatifs, mais un format erroné serait
+    // refusé par UPS avec un message peu parlant.
+    if (trackingNumbers !== undefined) {
+      if (!Array.isArray(trackingNumbers)) {
+        throw badRequest('Le champ "trackingNumbers" doit être un tableau.');
+      }
+      if (trackingNumbers.length > MAX_TRACKING_NUMBERS) {
+        throw badRequest(
+          `${MAX_TRACKING_NUMBERS} numéros de suivi maximum par enlèvement (${trackingNumbers.length} fournis).`,
+          ['trackingNumbers'],
+        );
+      }
+      trackingNumbers.forEach((n, i) => {
+        const value = String(n ?? '').trim();
+        if (!value) throw badRequest(`trackingNumbers[${i}] est vide.`, ['trackingNumbers']);
+        if (value.length > 18) {
+          throw badRequest(
+            `trackingNumbers[${i}] dépasse 18 caractères (« ${value} »).`,
+            ['trackingNumbers'],
+          );
+        }
+      });
+    }
+
     const result = await createPickup({
       address,
       pickupDate,
@@ -60,14 +85,25 @@ pickupRouter.post(
       phone,
       pickupPoint,
       residential: Boolean(residential),
+      trackingNumbers,
     });
 
     await log(req, {
       action: ACTIONS.PICKUP_CREATE,
       entityType: 'pickup',
-      entityId: result.prn,
-      summary: `Enlèvement planifié le ${pickupDate} à ${address?.city || 'adresse inconnue'}`,
-      metadata: { prn: result.prn, pickupDate, readyTime, closeTime },
+      entityId: result.confirmationNumber,
+      summary:
+        `Enlèvement planifié le ${pickupDate} à ${address?.city || 'adresse inconnue'}` +
+        (result.trackingNumbers?.length
+          ? ` — ${result.trackingNumbers.length} colis rattaché${result.trackingNumbers.length > 1 ? 's' : ''}`
+          : ''),
+      metadata: {
+        confirmationNumber: result.confirmationNumber,
+        pickupDate,
+        readyTime,
+        closeTime,
+        trackingNumbers: result.trackingNumbers ?? [],
+      },
     });
 
     res.status(201).json({ success: true, data: result });

@@ -10,6 +10,12 @@ export const CONTAINER_CODES = {
   '03': 'Enveloppe',
 };
 
+/**
+ * Nombre maximum de numéros de suivi rattachables à un enlèvement.
+ * Limite imposée par la spec UPS (TrackingData : 30 entrées).
+ */
+export const MAX_TRACKING_NUMBERS = 30;
+
 /** Convertit une date ISO (YYYY-MM-DD) au format UPS (YYYYMMDD). */
 function toUpsDate(value) {
   if (!value) return '';
@@ -38,6 +44,7 @@ export async function createPickup({
   phone,
   pickupPoint = '',
   residential = false,
+  trackingNumbers = [],
 }) {
   if (!config.accountNumber) {
     throw Object.assign(
@@ -46,9 +53,19 @@ export async function createPickup({
     );
   }
 
+  // Rattache l'enlèvement aux colis concernés. Le champ est optionnel côté
+  // UPS, mais sans lui rien ne relie l'enlèvement aux étiquettes créées.
+  const tracked = [...new Set(trackingNumbers.filter(Boolean).map((n) => String(n).trim()))].slice(
+    0,
+    MAX_TRACKING_NUMBERS,
+  );
+
   const body = {
     PickupCreationRequest: {
       RatePickupIndicator: rateePickup ? 'Y' : 'N',
+      // Champ requis par la spec, absent jusqu'ici : 'N' = enlèvement à
+      // l'adresse fournie, sans adresse alternative.
+      AlternateAddressIndicator: 'N',
       Shipper: {
         Account: {
           AccountNumber: config.accountNumber,
@@ -78,11 +95,16 @@ export async function createPickup({
         DestinationCountryCode: p.destinationCountry || address.country || 'FR',
         ContainerCode: p.containerCode || '01',
       })),
+      ...(tracked.length
+        ? { TrackingData: tracked.map((TrackingNumber) => ({ TrackingNumber })) }
+        : {}),
     },
   };
 
   const data = await upsFetch(`/pickupcreation/${V}/pickup`, { method: 'POST', body });
-  return normalizePickup(data);
+  // Les numéros retenus sont renvoyés : l'appelant sait ce qui a été rattaché
+  // après déduplication et troncature.
+  return { ...normalizePickup(data), trackingNumbers: tracked };
 }
 
 /**

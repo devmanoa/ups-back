@@ -133,6 +133,26 @@ réécrit jamais l'historique.
 | Tri | Adresse par défaut d'abord, puis les plus utilisées (`usage_count`) |
 | Sans `DATABASE_URL` | Les routes renvoient 503 ; le reste de l'application fonctionne |
 
+### Enlèvements et colis rattachés
+
+`POST /api/pickup` accepte un tableau `trackingNumbers` : il alimente le champ
+`TrackingData` de la spec UPS, qui rattache l'enlèvement aux colis concernés.
+
+Ce champ **n'était pas envoyé** jusqu'ici : rien ne reliait un enlèvement aux
+étiquettes créées. Il reste optionnel côté UPS — l'enlèvement fonctionne sans,
+ce qui explique que le manque soit passé inaperçu.
+
+| Règle | Détail |
+|---|---|
+| Maximum | 30 numéros (limite `TrackingData` de la spec UPS) |
+| Longueur | 18 caractères maximum par numéro, validé avant l'appel UPS |
+| Doublons | Retirés silencieusement ; la réponse liste ce qui a été retenu |
+| Tableau vide | `TrackingData` est alors absent du corps, plutôt qu'envoyé vide |
+
+`AlternateAddressIndicator` est désormais envoyé avec la valeur `N`. La spec le
+déclare **requis** et il manquait : un champ requis absent peut être toléré en
+environnement test et refusé en production.
+
 ### Types de colis
 
 Catalogue du matériel expédié régulièrement (DS620, QW410, bornes…) avec son
