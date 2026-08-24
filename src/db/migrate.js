@@ -38,8 +38,8 @@ CREATE TABLE IF NOT EXISTS shipments (
 -- Un même numéro de suivi ne doit pas être enregistré deux fois pour une
 -- même expédition. La contrainte porte sur le couple et non sur le seul
 -- numéro : en environnement CIE, UPS renvoie le numéro factice
--- 1ZXXXXXXXXXXXXXXXX pour tous les colis, et un index sur `tracking_number`
--- seul empêchait d'enregistrer les colis 2 et 3 d'un envoi multi-colis.
+-- 1ZXXXXXXXXXXXXXXXX pour tous les colis, et un index sur la seule colonne
+-- tracking_number empêchait d'enregistrer les colis 2 et 3 d'un envoi.
 DROP INDEX IF EXISTS shipments_tracking_uniq;
 CREATE UNIQUE INDEX IF NOT EXISTS shipments_tracking_shipment_uniq
   ON shipments (tracking_number, shipment_id) WHERE tracking_number IS NOT NULL;
