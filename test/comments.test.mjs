@@ -72,6 +72,13 @@ mock.module(src('db/shipmentsRepository.js'), {
     countByStatus: async () => ({}),
     getStats: async () => ({}),
     getLabel: async () => null,
+    listLabelsOfShipment: async (id) =>
+      id === '1Z999'
+        ? [
+            { base64: 'AAA', format: 'GIF', trackingNumber: '1Z999' },
+            { base64: 'BBB', format: 'GIF', trackingNumber: '1Z998' },
+          ]
+        : [],
   },
 });
 
@@ -307,4 +314,29 @@ test('un commentaire ecrit par UUID se relit dans le detail', async (t) => {
 
   const list = await call('GET', '/api/shipments/1Z999/comments');
   assert.equal(list.body.data.comments.length, 1, 'et dans la liste dediee');
+});
+
+test('les etiquettes de tous les colis sont renvoyees', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  // Un envoi de deux colis a deux etiquettes : n'en renvoyer qu'une
+  // laisserait le second colis sans son etiquette a l'impression.
+  const { status, body } = await call('GET', '/api/shipments/1Z999/labels');
+
+  assert.equal(status, 200);
+  assert.equal(body.data.count, 2);
+  assert.deepEqual(
+    body.data.labels.map((l) => l.trackingNumber),
+    ['1Z999', '1Z998'],
+  );
+});
+
+test('un envoi sans etiquette renvoie 404', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const { status, body } = await call('GET', '/api/shipments/1Z000/labels');
+  assert.equal(status, 404);
+  assert.equal(body.error.code, 'LABEL_NOT_FOUND');
 });

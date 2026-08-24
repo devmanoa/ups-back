@@ -79,6 +79,7 @@ mock.module(src('db/shipmentsRepository.js'), {
     // du routeur, même si ce test ne s'en sert pas.
     getStats: async () => ({}),
     getLabel: async () => null,
+    listLabelsOfShipment: async () => [],
   },
 });
 

@@ -8,6 +8,7 @@ import {
   countByStatus,
   getStats,
   getLabel,
+  listLabelsOfShipment,
 } from '../db/shipmentsRepository.js';
 import {
   listComments,
@@ -353,6 +354,26 @@ shipmentsRouter.get(
       });
     }
     res.json({ success: true, data: label });
+  }),
+);
+
+/**
+ * GET /api/shipments/:trackingNumber/labels — toutes les étiquettes de
+ * l'expédition.
+ *
+ * Déclarée avant `/:trackingNumber`, qui capterait « .../labels » sinon.
+ */
+shipmentsRouter.get(
+  '/:trackingNumber/labels',
+  asyncHandler(async (req, res) => {
+    const labels = await listLabelsOfShipment(req.params.trackingNumber);
+    if (labels.length === 0) {
+      throw Object.assign(new Error('Aucune étiquette enregistrée pour cet envoi.'), {
+        status: 404,
+        code: 'LABEL_NOT_FOUND',
+      });
+    }
+    res.json({ success: true, data: { labels, count: labels.length } });
   }),
 );
 

@@ -445,3 +445,29 @@ export async function getLabel(identifier) {
     trackingNumber: rows[0].tracking_number,
   };
 }
+
+/**
+ * Toutes les étiquettes d'une expédition, dans l'ordre des colis.
+ *
+ * `getLabel` n'en renvoie qu'une : sur un envoi multi-colis, imprimer depuis
+ * le détail ne sortait que la première et les autres restaient sur place.
+ */
+export async function listLabelsOfShipment(identifier) {
+  const shipment = await getShipmentByTracking(identifier);
+  if (!shipment) return [];
+
+  const { rows } = await query(
+    `SELECT label_base64, label_format, tracking_number
+       FROM shipments
+      WHERE COALESCE(local_shipment_id, shipment_id) = $1
+        AND label_base64 IS NOT NULL
+      ORDER BY id ASC`,
+    [shipment.localShipmentId],
+  );
+
+  return rows.map((row) => ({
+    base64: row.label_base64,
+    format: row.label_format,
+    trackingNumber: row.tracking_number,
+  }));
+}

@@ -42,6 +42,7 @@ mock.module(src('db/shipmentsRepository.js'), {
       return STATS;
     },
     getLabel: async () => null,
+    listLabelsOfShipment: async () => [],
   },
 });
 
