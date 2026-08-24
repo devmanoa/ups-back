@@ -22,13 +22,8 @@ mock.module(src('db/pool.js'), {
     isDbEnabled: () => true,
     query: async (sql, params = []) => {
       if (/^SELECT \* FROM shipments WHERE tracking_number/i.test(sql)) {
-        const [tracking, shipmentId] = params;
-        // Reproduit la clause « AND shipment_id <> $2 » du dépôt.
-        return {
-          rows: rows.filter(
-            (r) => r.tracking_number === tracking && r.shipment_id !== shipmentId,
-          ),
-        };
+        const [tracking] = params;
+        return { rows: rows.filter((r) => r.tracking_number === tracking) };
       }
 
       if (/^INSERT INTO shipments/i.test(sql)) {
@@ -87,16 +82,38 @@ test('les trois colis sont enregistres malgre un numero factice partage', async 
   assert.equal(rows.length, 3, 'trois lignes en base');
 });
 
-test('un rejeu de la meme expedition ne cree pas de doublon', async () => {
+test('deux envois CIE successifs sont tous deux enregistres', async () => {
   reset();
-  await saveShipment(cieShipment());
 
-  // Même expédition renvoyée deux fois : les lignes existent déjà, mais avec
-  // un shipment_id identique elles ne sont pas vues comme un rejeu — le
-  // deuxième appel réinsère. C'est le comportement accepté : l'index unique
-  // (tracking_number, shipment_id) empêche le doublon côté base.
-  const again = await saveShipment(cieShipment());
-  assert.equal(again.length, 3);
+  // Le cas signalé : tous les envois CIE portent 1ZXXXXXXXXXXXXXXXX. Le
+  // deuxième envoi était pris pour un rejeu du premier et n'apparaissait
+  // jamais dans l'historique.
+  await saveShipment(cieShipment('1ZSHIP_A'));
+  await saveShipment(cieShipment('1ZSHIP_B'));
+
+  assert.equal(rows.length, 6, 'trois colis par envoi, deux envois');
+  assert.equal(new Set(rows.map((r) => r.shipment_id)).size, 2, 'deux expeditions distinctes');
+});
+
+test('un envoi CIE d un seul colis apparait aussi', async () => {
+  reset();
+  await saveShipment(cieShipment('1ZSHIP_A'));
+
+  const single = {
+    shipment: {
+      shipmentIdentificationNumber: '1ZSHIP_SOLO',
+      packages: [{ trackingNumber: '1ZXXXXXXXXXXXXXXXX' }],
+    },
+    shipTo: { name: 'Solo' },
+  };
+  const saved = await saveShipment(single);
+
+  assert.equal(saved.length, 1);
+  assert.equal(
+    rows.filter((r) => r.shipment_id === '1ZSHIP_SOLO').length,
+    1,
+    'l envoi d un colis doit exister en base',
+  );
 });
 
 test('un numero deja vu sous une AUTRE expedition est bien un rejeu', async () => {

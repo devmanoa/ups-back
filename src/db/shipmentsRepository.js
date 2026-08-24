@@ -7,6 +7,20 @@ import { query } from './pool.js';
  */
 
 /**
+ * Vrai pour un numéro de suivi factice.
+ *
+ * L'environnement CIE (bac à sable UPS) ne délivre pas de vrais numéros :
+ * il renvoie 1ZXXXXXXXXXXXXXXXX, identique pour tous les colis et toutes
+ * les expéditions. Un tel numéro n'identifie rien et ne doit servir ni à
+ * détecter un rejeu, ni à retrouver un envoi.
+ */
+export function isPlaceholderTracking(trackingNumber) {
+  // Au moins six X consécutifs : couvre 1ZXXXXXXXXXXXXXXXX sans risquer de
+  // rejeter un vrai numéro, qui n'en contient jamais autant à la suite.
+  return /X{6,}/i.test(String(trackingNumber ?? ''));
+}
+
+/**
  * Enregistre les colis d'une expédition. Un envoi multi-colis produit
  * une ligne par numéro de suivi.
  */
@@ -17,17 +31,14 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
     // Un doublon (rejeu) ne doit pas faire échouer l'appel : l'étiquette UPS
     // existe déjà et le client doit la recevoir.
     //
-    // La comparaison porte aussi sur `shipment_id` : en environnement CIE,
-    // UPS renvoie le même numéro factice (1ZXXXXXXXXXXXXXXXX) pour tous les
-    // colis d'une expédition. Sans cette condition, le colis 2 serait pris
-    // pour un rejeu du colis 1 et les colis suivants disparaîtraient de
-    // l'historique — l'envoi n'apparaîtrait qu'avec le poids du premier.
-    const existing = pkg.trackingNumber
-      ? await query(
-          'SELECT * FROM shipments WHERE tracking_number = $1 AND shipment_id <> $2',
-          [pkg.trackingNumber, shipment.shipmentIdentificationNumber],
-        )
-      : { rows: [] };
+    // La détection est désactivée sur les numéros factices : en CIE, UPS
+    // renvoie 1ZXXXXXXXXXXXXXXXX pour tous les colis de toutes les
+    // expéditions. Les chercher en base ferait passer chaque nouvel envoi
+    // pour un rejeu du précédent, et il ne serait jamais enregistré.
+    const existing =
+      pkg.trackingNumber && !isPlaceholderTracking(pkg.trackingNumber)
+        ? await query('SELECT * FROM shipments WHERE tracking_number = $1', [pkg.trackingNumber])
+        : { rows: [] };
 
     if (existing.rows.length > 0) {
       rows.push(existing.rows[0]);
@@ -135,10 +146,23 @@ export async function listShipments({ search, status, batchId, from, to, limit =
   return { total: countRows[0].total, shipments: rows.map(toShipment) };
 }
 
-export async function getShipmentByTracking(trackingNumber) {
-  const { rows } = await query('SELECT * FROM shipments WHERE tracking_number = $1', [
-    trackingNumber,
-  ]);
+/**
+ * Retrouve un envoi par son numéro de suivi ou, à défaut, par son identifiant
+ * d'expédition.
+ *
+ * Le repli sur `shipment_id` n'est pas un confort : en CIE tous les envois
+ * partagent le numéro factice 1ZXXXXXXXXXXXXXXXX, et une recherche sur le
+ * seul numéro de suivi ramènerait toujours le même envoi quel que soit celui
+ * qu'on a demandé.
+ */
+export async function getShipmentByTracking(identifier) {
+  const { rows } = await query(
+    `SELECT * FROM shipments
+      WHERE tracking_number = $1 OR shipment_id = $1
+      ORDER BY id ASC
+      LIMIT 1`,
+    [identifier],
+  );
   return rows[0] ? toShipment(rows[0]) : null;
 }
 
@@ -386,10 +410,16 @@ function toShipment(row) {
 }
 
 /** Récupère l'étiquette stockée, à la demande. */
-export async function getLabel(trackingNumber) {
+export async function getLabel(identifier) {
   const { rows } = await query(
-    'SELECT label_base64, label_format, tracking_number FROM shipments WHERE tracking_number = $1',
-    [trackingNumber],
+    // Repli sur shipment_id, comme getShipmentByTracking : en CIE le numéro
+    // de suivi ne distingue pas les envois.
+    `SELECT label_base64, label_format, tracking_number
+       FROM shipments
+      WHERE tracking_number = $1 OR shipment_id = $1
+      ORDER BY id ASC
+      LIMIT 1`,
+    [identifier],
   );
   if (!rows[0]?.label_base64) return null;
   return {

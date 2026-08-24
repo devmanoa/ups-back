@@ -35,14 +35,18 @@ CREATE TABLE IF NOT EXISTS shipments (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Un même numéro de suivi ne doit pas être enregistré deux fois pour une
--- même expédition. La contrainte porte sur le couple et non sur le seul
--- numéro : en environnement CIE, UPS renvoie le numéro factice
--- 1ZXXXXXXXXXXXXXXXX pour tous les colis, et un index sur la seule colonne
--- tracking_number empêchait d'enregistrer les colis 2 et 3 d'un envoi.
+-- Un même numéro de suivi ne doit jamais être enregistré deux fois.
+--
+-- Les numéros factices en sont exclus : l'environnement CIE renvoie
+-- 1ZXXXXXXXXXXXXXXXX pour tous les colis de toutes les expéditions. Sous une
+-- contrainte d'unicité, seul le tout premier envoi de test s'enregistrerait
+-- et les suivants seraient rejetés. La règle reste entière en production,
+-- où chaque colis reçoit un numéro distinct.
 DROP INDEX IF EXISTS shipments_tracking_uniq;
-CREATE UNIQUE INDEX IF NOT EXISTS shipments_tracking_shipment_uniq
-  ON shipments (tracking_number, shipment_id) WHERE tracking_number IS NOT NULL;
+DROP INDEX IF EXISTS shipments_tracking_shipment_uniq;
+CREATE UNIQUE INDEX IF NOT EXISTS shipments_tracking_real_uniq
+  ON shipments (tracking_number)
+  WHERE tracking_number IS NOT NULL AND tracking_number !~* 'X{6,}';
 
 CREATE INDEX IF NOT EXISTS shipments_created_idx ON shipments (created_at DESC);
 CREATE INDEX IF NOT EXISTS shipments_status_idx  ON shipments (status);
