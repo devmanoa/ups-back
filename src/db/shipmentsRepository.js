@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { query } from './pool.js';
 
 /**
@@ -27,6 +28,14 @@ export function isPlaceholderTracking(trackingNumber) {
 export async function saveShipment({ shipment, shipTo, serviceCode, serviceName, description, labelFormat, accessPointLocationId, batchId, expectedDelivery, transitDays }) {
   const rows = [];
 
+  // Identifiant d'expédition propre à notre base, attribué ici.
+  //
+  // Celui d'UPS ne peut pas jouer ce rôle : en CIE il est factice et
+  // identique pour toutes les expéditions, si bien que deux envois vers des
+  // destinataires différents se retrouvaient fusionnés en un seul, avec les
+  // colis de l'un mêlés à ceux de l'autre.
+  const localShipmentId = randomUUID();
+
   for (const pkg of shipment.packages) {
     // Un doublon (rejeu) ne doit pas faire échouer l'appel : l'étiquette UPS
     // existe déjà et le client doit la recevoir.
@@ -51,8 +60,9 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
          recipient_name, recipient_company, recipient_address, recipient_city,
          recipient_postal, recipient_country, reference, description,
          total_charges, currency, billing_weight, label_format, label_base64,
-         access_point_id, batch_id, expected_delivery, transit_days
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+         access_point_id, batch_id, expected_delivery, transit_days,
+         local_shipment_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
        RETURNING *`,
       [
         shipment.shipmentIdentificationNumber,
@@ -76,6 +86,7 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
         batchId || null,
         expectedDelivery || null,
         transitDays ?? null,
+        localShipmentId,
       ],
     );
     rows.push(inserted[0]);
@@ -125,15 +136,15 @@ export async function listShipments({ search, status, batchId, from, to, limit =
   // l'historique. Le représentant est le premier colis inséré ;
   // `package_count` indique combien il y en a.
   const { rows: countRows } = await query(
-    `SELECT COUNT(DISTINCT shipment_id)::int AS total FROM shipments ${where}`,
+    `SELECT COUNT(DISTINCT COALESCE(local_shipment_id, shipment_id))::int AS total FROM shipments ${where}`,
     params,
   );
 
   params.push(limit, offset);
   const { rows } = await query(
     `WITH filtered AS (
-       SELECT *, COUNT(*) OVER (PARTITION BY shipment_id)::int AS package_count,
-              ROW_NUMBER() OVER (PARTITION BY shipment_id ORDER BY id ASC) AS rn
+       SELECT *, COUNT(*) OVER (PARTITION BY COALESCE(local_shipment_id, shipment_id))::int AS package_count,
+              ROW_NUMBER() OVER (PARTITION BY COALESCE(local_shipment_id, shipment_id) ORDER BY id ASC) AS rn
          FROM shipments ${where}
      )
      SELECT * FROM filtered
@@ -147,19 +158,18 @@ export async function listShipments({ search, status, batchId, from, to, limit =
 }
 
 /**
- * Retrouve un envoi par son numéro de suivi ou, à défaut, par son identifiant
- * d'expédition.
+ * Retrouve un envoi par son identifiant local, son numéro de suivi ou
+ * l'identifiant UPS de l'expédition.
  *
- * Le repli sur `shipment_id` n'est pas un confort : en CIE tous les envois
- * partagent le numéro factice 1ZXXXXXXXXXXXXXXXX, et une recherche sur le
- * seul numéro de suivi ramènerait toujours le même envoi quel que soit celui
- * qu'on a demandé.
+ * L'identifiant local est essayé en premier : c'est le seul qui désigne un
+ * envoi et un seul. En CIE, numéro de suivi comme identifiant UPS sont des
+ * valeurs factices partagées par toutes les expéditions.
  */
 export async function getShipmentByTracking(identifier) {
   const { rows } = await query(
     `SELECT * FROM shipments
-      WHERE tracking_number = $1 OR shipment_id = $1
-      ORDER BY id ASC
+      WHERE local_shipment_id = $1 OR tracking_number = $1 OR shipment_id = $1
+      ORDER BY (local_shipment_id = $1) DESC, id ASC
       LIMIT 1`,
     [identifier],
   );
@@ -169,14 +179,17 @@ export async function getShipmentByTracking(identifier) {
 /**
  * Tous les colis d'une même expédition, celui demandé compris.
  *
- * `saveShipment` écrit une ligne par colis sous un `shipment_id` commun :
- * une expédition de trois colis existe donc en trois lignes, dont la page de
- * détail ne montrerait qu'une seule sans cette lecture.
+ * Le regroupement se fait sur l'identifiant local : `shipment_id` vient
+ * d'UPS et vaut la même chose pour toutes les expéditions en CIE, ce qui
+ * mêlerait les colis d'envois sans rapport. Le COALESCE couvre les lignes
+ * antérieures à cette colonne.
  */
-export async function listPackagesOfShipment(shipmentId) {
+export async function listPackagesOfShipment(localOrUpsId) {
   const { rows } = await query(
-    'SELECT * FROM shipments WHERE shipment_id = $1 ORDER BY id ASC',
-    [shipmentId],
+    `SELECT * FROM shipments
+      WHERE COALESCE(local_shipment_id, shipment_id) = $1
+      ORDER BY id ASC`,
+    [localOrUpsId],
   );
   return rows.map(toShipment);
 }
@@ -403,6 +416,10 @@ function toShipment(row) {
     pickedUpAt: row.picked_up_at,
     deliveredAt: row.delivered_at,
     batchId: row.batch_id,
+    // Identifiant stable de l'expédition côté application : c'est lui que les
+    // liens de détail doivent porter, l'identifiant UPS ne distinguant pas
+    // les envois en CIE.
+    localShipmentId: row.local_shipment_id ?? row.shipment_id,
     createdAt: row.created_at,
     // Présent uniquement sur les listes regroupées par expédition.
     ...(row.package_count != null ? { packageCount: Number(row.package_count) } : {}),
@@ -412,12 +429,12 @@ function toShipment(row) {
 /** Récupère l'étiquette stockée, à la demande. */
 export async function getLabel(identifier) {
   const { rows } = await query(
-    // Repli sur shipment_id, comme getShipmentByTracking : en CIE le numéro
-    // de suivi ne distingue pas les envois.
+    // Même résolution que getShipmentByTracking : l'identifiant local
+    // d'abord, seul à désigner un envoi et un seul.
     `SELECT label_base64, label_format, tracking_number
        FROM shipments
-      WHERE tracking_number = $1 OR shipment_id = $1
-      ORDER BY id ASC
+      WHERE local_shipment_id = $1 OR tracking_number = $1 OR shipment_id = $1
+      ORDER BY (local_shipment_id = $1) DESC, id ASC
       LIMIT 1`,
     [identifier],
   );

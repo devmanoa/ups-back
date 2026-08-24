@@ -59,10 +59,10 @@ mock.module(src('db/shipmentsRepository.js'), {
     listShipments: async () => ({ total: 0, shipments: [] }),
     listOpenShipments: async () => [],
     getShipmentByTracking: async (t) =>
-      t === '1Z999' ? { trackingNumber: '1Z999', shipmentId: '1Z9SHIP', status: 'created' } : null,
+      t === '1Z999' ? { trackingNumber: '1Z999', shipmentId: '1Z9SHIP', localShipmentId: 'local-1', status: 'created' } : null,
     // Expédition de deux colis : la page doit les montrer tous les deux.
     listPackagesOfShipment: async (id) =>
-      id === '1Z9SHIP'
+      id === 'local-1'
         ? [
             { trackingNumber: '1Z999', shipmentId: '1Z9SHIP', billingWeight: '2.5 KGS' },
             { trackingNumber: '1Z998', shipmentId: '1Z9SHIP', billingWeight: '1.0 KGS' },

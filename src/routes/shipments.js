@@ -449,7 +449,7 @@ shipmentsRouter.get(
       listComments(shipment.trackingNumber).catch(() => []),
       // Les colis frères de la même expédition : sans eux, un envoi de trois
       // colis n'en montrerait qu'un.
-      listPackagesOfShipment(shipment.shipmentId).catch(() => [shipment]),
+      listPackagesOfShipment(shipment.localShipmentId).catch(() => [shipment]),
     ]);
 
     res.json({ success: true, data: { shipment, creator, activity, comments, packages } });

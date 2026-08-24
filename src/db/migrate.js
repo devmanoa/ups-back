@@ -9,7 +9,14 @@ import { query, isDbEnabled } from './pool.js';
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS shipments (
   id                  BIGSERIAL PRIMARY KEY,
+  -- Identifiant UPS de l'expédition. Ne peut pas servir de clé de
+  -- regroupement : en CIE, UPS renvoie la même valeur factice pour toutes
+  -- les expéditions, ce qui fusionnerait des envois sans rapport.
   shipment_id         TEXT NOT NULL,
+  -- Notre propre identifiant d'expédition, attribué à l'enregistrement.
+  -- C'est lui qui regroupe les colis d'un même envoi, sans dépendre de ce
+  -- qu'UPS renvoie.
+  local_shipment_id   TEXT,
   tracking_number     TEXT,
   service_code        TEXT,
   service_name        TEXT,
@@ -59,6 +66,28 @@ ALTER TABLE shipments ADD COLUMN IF NOT EXISTS transit_days      INTEGER;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS last_event_at     TIMESTAMPTZ;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS picked_up_at      TIMESTAMPTZ;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivered_at      TIMESTAMPTZ;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS local_shipment_id TEXT;
+
+-- Reprise des lignes antérieures à cette colonne. Les envois CIE partagent
+-- un shipment_id factice : les regrouper par (shipment_id, created_at à la
+-- seconde près) sépare des expéditions distinctes créées à des moments
+-- différents, sans casser les vrais envois multi-colis, dont les lignes sont
+-- écrites dans la même seconde.
+UPDATE shipments s
+   SET local_shipment_id = g.key
+  FROM (
+    SELECT shipment_id,
+           date_trunc('second', created_at) AS second,
+           shipment_id || '-' || EXTRACT(EPOCH FROM date_trunc('second', created_at))::bigint
+             AS key
+      FROM shipments
+     GROUP BY shipment_id, date_trunc('second', created_at)
+  ) g
+ WHERE s.local_shipment_id IS NULL
+   AND s.shipment_id = g.shipment_id
+   AND date_trunc('second', s.created_at) = g.second;
+
+CREATE INDEX IF NOT EXISTS shipments_local_idx ON shipments (local_shipment_id);
 
 CREATE INDEX IF NOT EXISTS shipments_expected_idx ON shipments (expected_delivery)
   WHERE expected_delivery IS NOT NULL;

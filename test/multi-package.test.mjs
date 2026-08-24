@@ -36,6 +36,7 @@ mock.module(src('db/pool.js'), {
           recipient_name: params[4],
           billing_weight: params[14],
           total_charges: params[12],
+          local_shipment_id: params[21],
         };
         rows.push(row);
         return { rows: [row] };
@@ -150,4 +151,55 @@ test('les colis d une expedition partagent le meme shipment_id', async () => {
     rows.every((r) => r.shipment_id === '1ZSHIP42'),
     'le regroupement de la page de detail en depend',
   );
+});
+
+test('deux envois partageant le shipment_id UPS ne fusionnent pas', async () => {
+  reset();
+
+  // Le cas signale : en CIE, ShipmentIdentificationNumber est lui aussi
+  // factice et identique. Deux envois vers des destinataires differents
+  // apparaissaient comme une seule expedition de cinq colis.
+  const upsId = '1ZXXXXXXXXXXXXXXXX';
+
+  await saveShipment({
+    shipment: {
+      shipmentIdentificationNumber: upsId,
+      packages: [{ trackingNumber: upsId }],
+    },
+    shipTo: { name: 'Premier destinataire', city: 'Paris' },
+  });
+
+  await saveShipment({
+    shipment: {
+      shipmentIdentificationNumber: upsId,
+      packages: [
+        { trackingNumber: upsId },
+        { trackingNumber: upsId },
+        { trackingNumber: upsId },
+        { trackingNumber: upsId },
+      ],
+    },
+    shipTo: { name: 'Second destinataire', city: 'Lyon' },
+  });
+
+  const groups = new Set(rows.map((r) => r.local_shipment_id));
+  assert.equal(groups.size, 2, 'deux expeditions distinctes malgre un shipment_id commun');
+  assert.equal(rows.length, 5);
+
+  // Chaque groupe garde son propre destinataire.
+  const byGroup = {};
+  for (const r of rows) (byGroup[r.local_shipment_id] ??= []).push(r.recipient_name);
+  for (const names of Object.values(byGroup)) {
+    assert.equal(new Set(names).size, 1, 'un envoi ne melange pas deux destinataires');
+  }
+});
+
+test('chaque envoi recoit un identifiant local distinct', async () => {
+  reset();
+  await saveShipment(cieShipment('1ZSHIP_A'));
+  await saveShipment(cieShipment('1ZSHIP_A'));
+
+  const ids = new Set(rows.map((r) => r.local_shipment_id));
+  assert.equal(ids.size, 2, 'meme shipment_id UPS, deux identifiants locaux');
+  assert.ok([...ids].every(Boolean), 'aucun identifiant local vide');
 });
