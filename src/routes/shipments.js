@@ -8,6 +8,14 @@ import {
   getStats,
   getLabel,
 } from '../db/shipmentsRepository.js';
+import {
+  listComments,
+  addComment,
+  deleteComment,
+  countByTracking,
+  MAX_BODY,
+} from '../db/commentsRepository.js';
+import { findCreator, findCreators, listActivity } from '../db/activityRepository.js';
 import { withAnomalies, summarize } from '../services/anomalies.js';
 import { config } from '../config.js';
 import { isDbEnabled } from '../db/pool.js';
@@ -19,6 +27,19 @@ export const shipmentsRouter = Router();
 
 /** Statuts internes, distincts des libellés UPS. */
 const STATUSES = ['created', 'in_transit', 'delivered', 'exception', 'voided'];
+
+/**
+ * Garde locale plutôt qu'un `router.use` : les autres routes de ce fichier
+ * (suivi, tarifs) fonctionnent sans base et ne doivent pas être bloquées.
+ */
+function requireDb() {
+  if (!isDbEnabled()) {
+    throw Object.assign(
+      new Error('Les commentaires nécessitent une base PostgreSQL. Renseignez DATABASE_URL.'),
+      { status: 503, code: 'DB_NOT_CONFIGURED' },
+    );
+  }
+}
 
 /**
  * Déduit un statut interne à partir du libellé UPS.
@@ -92,13 +113,26 @@ shipmentsRouter.get(
     const now = new Date();
     const shipments = result.shipments.map((s) => withAnomalies(s, now));
 
+    const visible =
+      req.query.anomaliesOnly === 'true' ? shipments.filter((s) => s.hasAnomaly) : shipments;
+
+    // Auteurs et compteurs de commentaires en deux requêtes, pas deux par
+    // ligne. Un échec ici n'empêche pas d'afficher la liste.
+    const trackingNumbers = visible.map((s) => s.trackingNumber).filter(Boolean);
+    const [creators, commentCounts] = await Promise.all([
+      findCreators('shipment', trackingNumbers).catch(() => ({})),
+      countByTracking(trackingNumbers).catch(() => ({})),
+    ]);
+
     res.json({
       success: true,
       data: {
         ...result,
-        shipments: req.query.anomaliesOnly === 'true'
-          ? shipments.filter((s) => s.hasAnomaly)
-          : shipments,
+        shipments: visible.map((s) => ({
+          ...s,
+          creator: creators[s.trackingNumber] ?? null,
+          commentCount: commentCounts[s.trackingNumber] ?? 0,
+        })),
         limit,
         offset,
       },
@@ -321,7 +355,78 @@ shipmentsRouter.get(
   }),
 );
 
-/** GET /api/shipments/:trackingNumber — détail d'un envoi */
+/**
+ * GET /api/shipments/:trackingNumber/comments — fil de discussion de l'envoi
+ *
+ * Déclaré avant `/:trackingNumber` : Express retient la première route qui
+ * correspond, et le motif générique capterait « .../comments » sinon.
+ */
+shipmentsRouter.get(
+  '/:trackingNumber/comments',
+  asyncHandler(async (req, res) => {
+    requireDb();
+    const comments = await listComments(req.params.trackingNumber);
+    res.json({ success: true, data: { comments, count: comments.length } });
+  }),
+);
+
+/** POST /api/shipments/:trackingNumber/comments — ajoute un commentaire */
+shipmentsRouter.post(
+  '/:trackingNumber/comments',
+  asyncHandler(async (req, res) => {
+    requireDb();
+
+    const body = String(req.body?.body ?? '').trim();
+    if (!body) throw badRequest('Le commentaire ne peut pas être vide.');
+    if (body.length > MAX_BODY) {
+      throw badRequest(`Le commentaire dépasse ${MAX_BODY} caractères.`);
+    }
+
+    const comment = await addComment({
+      trackingNumber: req.params.trackingNumber,
+      body,
+      actor: req.actor,
+    });
+
+    res.status(201).json({ success: true, data: comment });
+  }),
+);
+
+/** DELETE /api/shipments/:trackingNumber/comments/:id — retire son commentaire */
+shipmentsRouter.delete(
+  '/:trackingNumber/comments/:id',
+  asyncHandler(async (req, res) => {
+    requireDb();
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) throw badRequest('Identifiant de commentaire invalide.');
+
+    const outcome = await deleteComment(id, req.actor?.id ?? null);
+
+    if (outcome === 'not_found') {
+      throw Object.assign(new Error('Commentaire introuvable.'), {
+        status: 404,
+        code: 'COMMENT_NOT_FOUND',
+      });
+    }
+    if (outcome === 'forbidden') {
+      throw Object.assign(
+        new Error('Un commentaire ne peut être supprimé que par son auteur.'),
+        { status: 403, code: 'COMMENT_FORBIDDEN' },
+      );
+    }
+
+    res.json({ success: true, data: { id } });
+  }),
+);
+
+/**
+ * GET /api/shipments/:trackingNumber — détail d'un envoi
+ *
+ * Rassemble ce que la page dédiée affiche : l'envoi, son auteur (lu dans le
+ * journal, la table shipments n'en portant pas), le journal des actions le
+ * concernant et le fil de commentaires.
+ */
 shipmentsRouter.get(
   '/:trackingNumber',
   asyncHandler(async (req, res) => {
@@ -332,6 +437,17 @@ shipmentsRouter.get(
         code: 'SHIPMENT_NOT_FOUND',
       });
     }
-    res.json({ success: true, data: shipment });
+
+    // Le détail reste consultable même si une de ces lectures échoue : elles
+    // enrichissent la page, elles ne la conditionnent pas.
+    const [creator, activity, comments] = await Promise.all([
+      findCreator('shipment', shipment.trackingNumber).catch(() => null),
+      listActivity({ entityType: 'shipment', entityId: shipment.trackingNumber, limit: 100 })
+        .then((r) => r.entries)
+        .catch(() => []),
+      listComments(shipment.trackingNumber).catch(() => []),
+    ]);
+
+    res.json({ success: true, data: { shipment, creator, activity, comments } });
   }),
 );

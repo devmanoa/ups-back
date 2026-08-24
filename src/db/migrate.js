@@ -154,6 +154,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS package_types_label_uniq
 
 CREATE INDEX IF NOT EXISTS package_types_usage_idx
   ON package_types (usage_count DESC, last_used_at DESC);
+
+-- Commentaires libres attachés à un envoi : ce que le journal d'activité ne
+-- peut pas dire (« client prévenu », « colis récupéré sur place »).
+CREATE TABLE IF NOT EXISTS shipment_comments (
+  id              BIGSERIAL PRIMARY KEY,
+  -- Rattaché au numéro de suivi et non à shipments.id : une expédition
+  -- multi-colis occupe plusieurs lignes, et le numéro est ce que l'équipe
+  -- manipule. Pas de clé étrangère, pour la même raison.
+  tracking_number TEXT NOT NULL,
+  -- Auteur recopié, comme dans activity_log : Keycloak est la source
+  -- d'identité, et un utilisateur supprimé ne doit pas effacer le fil.
+  actor_id        TEXT,
+  actor_name      TEXT,
+  actor_email     TEXT,
+  body            TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at      TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS shipment_comments_tracking_idx
+  ON shipment_comments (tracking_number, created_at DESC);
 `;
 
 export async function migrate() {
@@ -164,7 +185,9 @@ export async function migrate() {
 
   try {
     await query(SCHEMA);
-    console.log('  → Base PostgreSQL prête (shipments, addresses, activity_log, package_types)');
+    console.log(
+      '  → Base PostgreSQL prête (shipments, addresses, activity_log, package_types, shipment_comments)',
+    );
     return true;
   } catch (err) {
     // Une base injoignable ne doit pas empêcher les autres pages de fonctionner.

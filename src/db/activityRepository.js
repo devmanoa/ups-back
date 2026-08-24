@@ -137,6 +137,59 @@ export async function countByAction({ from, to } = {}) {
   return Object.fromEntries(rows.map((r) => [r.action, r.count]));
 }
 
+/**
+ * Retrouve l'auteur de la création d'une entité, depuis le journal.
+ *
+ * La table shipments ne porte pas d'auteur : le journal fait foi. Cela évite
+ * une migration et couvre les envois déjà enregistrés, à condition que leur
+ * ligne de journal existe.
+ */
+export async function findCreator(entityType, entityId) {
+  const { rows } = await query(
+    // `$1 || '.create'` plutôt qu'un LIKE : « shipment.create » est une
+    // création, « shipment.void » n'en est pas une, et un LIKE '%create%'
+    // les confondrait au premier renommage d'action.
+    `SELECT actor_id, actor_name, actor_email, occurred_at
+       FROM activity_log
+      WHERE entity_type = $1 AND entity_id = $2 AND action = $1 || '.create'
+      ORDER BY occurred_at ASC
+      LIMIT 1`,
+    [entityType, String(entityId)],
+  );
+
+  const row = rows[0];
+  if (!row || (!row.actor_id && !row.actor_name)) return null;
+
+  return {
+    id: row.actor_id,
+    name: row.actor_name ?? 'Utilisateur inconnu',
+    email: row.actor_email,
+    at: row.occurred_at,
+  };
+}
+
+/** Auteurs de création pour plusieurs entités, en une requête. */
+export async function findCreators(entityType, entityIds) {
+  if (!entityIds?.length) return {};
+
+  const { rows } = await query(
+    `SELECT DISTINCT ON (entity_id) entity_id, actor_id, actor_name, actor_email
+       FROM activity_log
+      WHERE entity_type = $1 AND entity_id = ANY($2) AND action = $1 || '.create'
+      ORDER BY entity_id, occurred_at ASC`,
+    [entityType, entityIds.map(String)],
+  );
+
+  return Object.fromEntries(
+    rows
+      .filter((r) => r.actor_id || r.actor_name)
+      .map((r) => [
+        r.entity_id,
+        { id: r.actor_id, name: r.actor_name ?? 'Utilisateur inconnu', email: r.actor_email },
+      ]),
+  );
+}
+
 function toEntry(row) {
   return {
     id: row.id,
