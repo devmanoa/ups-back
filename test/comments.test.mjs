@@ -59,7 +59,15 @@ mock.module(src('db/shipmentsRepository.js'), {
     listShipments: async () => ({ total: 0, shipments: [] }),
     listOpenShipments: async () => [],
     getShipmentByTracking: async (t) =>
-      t === '1Z999' ? { trackingNumber: '1Z999', status: 'created' } : null,
+      t === '1Z999' ? { trackingNumber: '1Z999', shipmentId: '1Z9SHIP', status: 'created' } : null,
+    // Expédition de deux colis : la page doit les montrer tous les deux.
+    listPackagesOfShipment: async (id) =>
+      id === '1Z9SHIP'
+        ? [
+            { trackingNumber: '1Z999', shipmentId: '1Z9SHIP', billingWeight: '2.5 KGS' },
+            { trackingNumber: '1Z998', shipmentId: '1Z9SHIP', billingWeight: '1.0 KGS' },
+          ]
+        : [],
     updateStatus: async () => null,
     countByStatus: async () => ({}),
     getStats: async () => ({}),
@@ -226,6 +234,21 @@ test('le detail rassemble envoi, auteur, journal et commentaires', async (t) => 
   assert.ok('creator' in body.data);
   assert.ok(Array.isArray(body.data.activity));
   assert.ok(Array.isArray(body.data.comments));
+});
+
+test('les colis freres de l expedition sont tous renvoyes', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const { body } = await call('GET', '/api/shipments/1Z999');
+
+  // Une expédition multi-colis occupe plusieurs lignes sous un même
+  // shipment_id : n'en renvoyer qu'une masquerait les autres colis.
+  assert.equal(body.data.packages.length, 2);
+  assert.deepEqual(
+    body.data.packages.map((p) => p.trackingNumber),
+    ['1Z999', '1Z998'],
+  );
 });
 
 test('un envoi inconnu renvoie 404', async (t) => {

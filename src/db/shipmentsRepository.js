@@ -123,6 +123,21 @@ export async function getShipmentByTracking(trackingNumber) {
   return rows[0] ? toShipment(rows[0]) : null;
 }
 
+/**
+ * Tous les colis d'une même expédition, celui demandé compris.
+ *
+ * `saveShipment` écrit une ligne par colis sous un `shipment_id` commun :
+ * une expédition de trois colis existe donc en trois lignes, dont la page de
+ * détail ne montrerait qu'une seule sans cette lecture.
+ */
+export async function listPackagesOfShipment(shipmentId) {
+  const { rows } = await query(
+    'SELECT * FROM shipments WHERE shipment_id = $1 ORDER BY id ASC',
+    [shipmentId],
+  );
+  return rows.map(toShipment);
+}
+
 /** Met à jour le statut après interrogation de l'API Tracking. */
 export async function updateStatus(trackingNumber, { status, description, eventDate }) {
   const { rows } = await query(

@@ -34,6 +34,7 @@ mock.module(src('db/shipmentsRepository.js'), {
     listShipments: async () => ({ total: 0, shipments: [] }),
     listOpenShipments: async () => [],
     getShipmentByTracking: async () => null,
+    listPackagesOfShipment: async () => [],
     updateStatus: async () => null,
     countByStatus: async () => ({ created: 1, in_transit: 1, delivered: 1 }),
     getStats: async (params) => {

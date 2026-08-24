@@ -3,6 +3,7 @@ import {
   listShipments,
   listOpenShipments,
   getShipmentByTracking,
+  listPackagesOfShipment,
   updateStatus,
   countByStatus,
   getStats,
@@ -440,14 +441,17 @@ shipmentsRouter.get(
 
     // Le détail reste consultable même si une de ces lectures échoue : elles
     // enrichissent la page, elles ne la conditionnent pas.
-    const [creator, activity, comments] = await Promise.all([
+    const [creator, activity, comments, packages] = await Promise.all([
       findCreator('shipment', shipment.trackingNumber).catch(() => null),
       listActivity({ entityType: 'shipment', entityId: shipment.trackingNumber, limit: 100 })
         .then((r) => r.entries)
         .catch(() => []),
       listComments(shipment.trackingNumber).catch(() => []),
+      // Les colis frères de la même expédition : sans eux, un envoi de trois
+      // colis n'en montrerait qu'un.
+      listPackagesOfShipment(shipment.shipmentId).catch(() => [shipment]),
     ]);
 
-    res.json({ success: true, data: { shipment, creator, activity, comments } });
+    res.json({ success: true, data: { shipment, creator, activity, comments, packages } });
   }),
 );
