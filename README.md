@@ -63,6 +63,16 @@ Le serveur écoute sur `http://localhost:3000`.
 | `POST` | `/api/shipments/sync` | Actualise tous les statuts en un appel (QuantumView) |
 | `GET` | `/api/shipments/:tracking` | Détail d'un envoi enregistré |
 | `GET` | `/api/shipments/:tracking/label` | Étiquette stockée, en base64 |
+| `GET` | `/api/addresses` | Carnet d'adresses : liste, avec recherche et filtre par groupe |
+| `POST` | `/api/addresses` | Enregistre une adresse |
+| `PUT` | `/api/addresses/:id` | Modifie une adresse |
+| `DELETE` | `/api/addresses/:id` | Archive une adresse (`?hard=true` pour supprimer) |
+| `POST` | `/api/addresses/:id/restore` | Restaure une adresse archivée |
+| `POST` | `/api/addresses/:id/use` | Enregistre une utilisation (tri par fréquence) |
+| `GET` | `/api/addresses/groups` | Groupes et nombre d'adresses |
+| `POST` | `/api/addresses/groups` | Crée un groupe |
+| `PUT` | `/api/addresses/groups/:id` | Renomme un groupe |
+| `DELETE` | `/api/addresses/groups/:id` | Supprime un groupe (les adresses sont conservées) |
 
 ### Historique des envois
 
@@ -85,6 +95,28 @@ et l'échec est journalisé. La réponse porte alors `saved: false`.
 un **abonnement Quantum View** doit être configuré sur le compte, et les événements
 ne remontent qu'à **environ 14 jours**. Les colis absents de l'historique local sont
 ignorés — QuantumView renvoie aussi les envois créés hors de cette application.
+
+### Carnet d'adresses
+
+Référentiel d'adresses réutilisables, **partagé par tous les utilisateurs** :
+une adresse enregistrée par une personne est immédiatement disponible pour les
+autres. Les groupes (« antennes », « partenaires »…) sont plats, sans hiérarchie.
+
+Les champs obligatoires sont exactement ceux que l'API Shipping exige d'un
+destinataire (`name`, `addressLine1`, `city`, `postalCode`, `country`) : une
+adresse du carnet est donc toujours expédiable.
+
+Aucune clé étrangère ne relie le carnet à `shipments` — les envois recopient
+l'adresse à leur création. Modifier ou archiver une entrée du carnet ne
+réécrit jamais l'historique.
+
+| Comportement | Détail |
+|---|---|
+| Suppression | Archivage par défaut (`archived_at`), restaurable. `?hard=true` supprime réellement |
+| Suppression d'un groupe | Ses adresses sont conservées et deviennent « sans groupe » |
+| Nom (`label`) | Unique parmi les adresses actives ; l'archivage libère le nom |
+| Tri | Adresse par défaut d'abord, puis les plus utilisées (`usage_count`) |
+| Sans `DATABASE_URL` | Les routes renvoient 503 ; le reste de l'application fonctionne |
 
 ### Détection d'anomalies
 
@@ -183,6 +215,11 @@ src/
 │   ├── rating.js          Tarifs
 │   ├── shipping.js        Étiquettes
 │   └── locator.js         Points relais
+├── db/
+│   ├── pool.js            Pool PostgreSQL partagé (optionnel)
+│   ├── migrate.js         Schéma créé au démarrage, idempotent
+│   ├── shipmentsRepository.js   Historique des envois
+│   └── addressesRepository.js   Carnet d'adresses partagé
 ├── routes/                Routes Express + validation d'entrée
 └── middleware/            Validation et gestion d'erreurs
 ```

@@ -53,6 +53,53 @@ ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivered_at      TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS shipments_expected_idx ON shipments (expected_delivery)
   WHERE expected_delivery IS NOT NULL;
+
+-- Carnet d'adresses partagé : réutilisable comme destinataire sur toutes les
+-- pages de saisie. Les groupes (« antennes », « partenaires »…) sont plats :
+-- une hiérarchie n'a pas d'usage identifié ici.
+CREATE TABLE IF NOT EXISTS address_groups (
+  id         BIGSERIAL PRIMARY KEY,
+  name       TEXT NOT NULL,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS address_groups_name_uniq
+  ON address_groups (LOWER(name));
+
+CREATE TABLE IF NOT EXISTS addresses (
+  id             BIGSERIAL PRIMARY KEY,
+  -- Supprimer un groupe ne doit jamais supprimer ses adresses : elles
+  -- retombent dans « Sans groupe ».
+  group_id       BIGINT REFERENCES address_groups(id) ON DELETE SET NULL,
+  label          TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  attention_name TEXT,
+  phone          TEXT,
+  address_line1  TEXT NOT NULL,
+  address_line2  TEXT,
+  city           TEXT NOT NULL,
+  state          TEXT,
+  postal_code    TEXT NOT NULL,
+  country        TEXT NOT NULL DEFAULT 'FR',
+  residential    BOOLEAN NOT NULL DEFAULT FALSE,
+  is_default     BOOLEAN NOT NULL DEFAULT FALSE,
+  usage_count    INTEGER NOT NULL DEFAULT 0,
+  last_used_at   TIMESTAMPTZ,
+  archived_at    TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Deux adresses actives de même nom rendraient le sélecteur ambigu.
+-- L'archivage libère le nom.
+CREATE UNIQUE INDEX IF NOT EXISTS addresses_label_uniq
+  ON addresses (LOWER(label)) WHERE archived_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS addresses_group_idx ON addresses (group_id)
+  WHERE archived_at IS NULL;
+CREATE INDEX IF NOT EXISTS addresses_usage_idx
+  ON addresses (usage_count DESC, last_used_at DESC);
 `;
 
 export async function migrate() {
@@ -63,7 +110,7 @@ export async function migrate() {
 
   try {
     await query(SCHEMA);
-    console.log('  → Base PostgreSQL prête (table shipments)');
+    console.log('  → Base PostgreSQL prête (tables shipments, addresses)');
     return true;
   } catch (err) {
     // Une base injoignable ne doit pas empêcher les autres pages de fonctionner.

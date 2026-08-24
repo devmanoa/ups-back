@@ -12,6 +12,7 @@ import { landedCostRouter } from './routes/landedCost.js';
 import { pickupRouter } from './routes/pickup.js';
 import { paperlessRouter } from './routes/paperless.js';
 import { shipmentsRouter } from './routes/shipments.js';
+import { addressesRouter } from './routes/addresses.js';
 import { migrate } from './db/migrate.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { asyncHandler } from './middleware/validate.js';
@@ -54,6 +55,7 @@ app.use('/api/landed-cost', landedCostRouter);
 app.use('/api/pickup', pickupRouter);
 app.use('/api/paperless', paperlessRouter);
 app.use('/api/shipments', shipmentsRouter);
+app.use('/api/addresses', addressesRouter);
 
 app.use(notFound);
 app.use(errorHandler);

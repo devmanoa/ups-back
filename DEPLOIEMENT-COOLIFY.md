@@ -66,8 +66,9 @@ SHIPPER_COUNTRY=FR
 
 ### Base PostgreSQL
 
-La page « Envois en cours » nécessite une base : UPS ne permet pas de relire les
-expéditions déjà créées.
+Les pages « Envois en cours » et « Carnet d'adresses » nécessitent une base : UPS ne
+permet pas de relire les expéditions déjà créées, ni de stocker un référentiel
+d'adresses.
 
 Dans Coolify : **New Resource → Database → PostgreSQL**. Une fois créée, copiez son
 URL de connexion interne dans `DATABASE_URL` du backend. Le schéma est créé
@@ -77,7 +78,7 @@ Laissez `DATABASE_SSL=false` pour une base Coolify (réseau interne) ; passez à
 pour une base managée externe (Neon, Supabase…).
 
 > Sans `DATABASE_URL`, le reste de l'application fonctionne normalement : seules les
-> pages « Envois en cours » et « Envoi groupé » sont inopérantes.
+> pages « Envois en cours », « Envoi groupé » et « Carnet d'adresses » sont inopérantes.
 
 ---
 
