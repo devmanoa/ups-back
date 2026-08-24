@@ -5,6 +5,7 @@ import { getTransitTimes } from '../services/timeInTransit.js';
 import { saveShipment, markVoided } from '../db/shipmentsRepository.js';
 import { isDbEnabled } from '../db/pool.js';
 import { asyncHandler, badRequest, requireFields, validatePackages } from '../middleware/validate.js';
+import { log, ACTIONS, describeRecipient } from '../services/activity.js';
 
 export const shippingRouter = Router();
 
@@ -53,6 +54,21 @@ shippingRouter.post(
       description,
       labelFormat,
       accessPointLocationId,
+    });
+
+    const tracking = result.packages?.[0]?.trackingNumber;
+    await log(req, {
+      action: ACTIONS.SHIPMENT_CREATE,
+      entityType: 'shipment',
+      entityId: tracking || result.shipmentIdentificationNumber,
+      summary: `Étiquette ${tracking || result.shipmentIdentificationNumber} → ${describeRecipient(shipTo)}`,
+      metadata: {
+        shipmentId: result.shipmentIdentificationNumber,
+        packageCount: result.packages?.length ?? 1,
+        serviceCode,
+        totalCharges: result.totalCharges ?? null,
+        currency: result.currency ?? null,
+      },
     });
 
     res.status(201).json({ success: true, data: { ...result, saved } });
@@ -184,10 +200,21 @@ shippingRouter.post(
     }
 
     const created = results.filter((r) => r.ok).length;
+    const failed = results.length - created;
+
+    await log(req, {
+      action: ACTIONS.BULK_CREATE,
+      entityType: 'batch',
+      entityId: batchId,
+      summary:
+        `Envoi groupé : ${created} étiquette${created > 1 ? 's' : ''} créée${created > 1 ? 's' : ''}` +
+        (failed > 0 ? `, ${failed} en échec` : ''),
+      metadata: { batchId, created, failed, total: results.length },
+    });
 
     res.status(created > 0 ? 201 : 502).json({
       success: created > 0,
-      data: { batchId, created, failed: results.length - created, results },
+      data: { batchId, created, failed, results },
     });
   }),
 );
@@ -209,6 +236,16 @@ shippingRouter.delete(
       } catch (err) {
         console.error('[shipments] Mise à jour du statut annulé impossible :', err.message);
       }
+    }
+
+    if (result.success) {
+      await log(req, {
+        action: ACTIONS.SHIPMENT_VOID,
+        entityType: 'shipment',
+        entityId: req.params.shipmentId,
+        summary: `Expédition ${req.params.shipmentId} annulée`,
+        metadata: { trackingNumbers },
+      });
     }
 
     res.json({ success: result.success, data: result });

@@ -65,9 +65,14 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
 }
 
 /** Liste paginée avec recherche et filtres. */
-export async function listShipments({ search, status, from, to, limit = 50, offset = 0 } = {}) {
+export async function listShipments({ search, status, batchId, from, to, limit = 50, offset = 0 } = {}) {
   const conditions = [];
   const params = [];
+
+  if (batchId) {
+    params.push(batchId);
+    conditions.push(`batch_id = $${params.length}`);
+  }
 
   if (search) {
     params.push(`%${search}%`);

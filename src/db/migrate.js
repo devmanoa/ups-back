@@ -100,6 +100,30 @@ CREATE INDEX IF NOT EXISTS addresses_group_idx ON addresses (group_id)
   WHERE archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS addresses_usage_idx
   ON addresses (usage_count DESC, last_used_at DESC);
+
+-- Journal d'activité : qui a fait quoi dans l'application. Distinct de
+-- l'historique UPS (parcours du colis), qui vit dans la table shipments.
+CREATE TABLE IF NOT EXISTS activity_log (
+  id           BIGSERIAL PRIMARY KEY,
+  occurred_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- L'auteur est recopié, sans clé étrangère : Keycloak est la source
+  -- d'identité, et un utilisateur supprimé ne doit pas effacer l'histoire.
+  actor_id     TEXT,
+  actor_name   TEXT,
+  actor_email  TEXT,
+  action       TEXT NOT NULL,
+  entity_type  TEXT,
+  entity_id    TEXT,
+  -- Résumé figé à l'écriture : renommer une adresse plus tard ne doit pas
+  -- réécrire le passé. C'est un journal, pas une vue.
+  summary      TEXT NOT NULL,
+  metadata     JSONB
+);
+
+CREATE INDEX IF NOT EXISTS activity_occurred_idx ON activity_log (occurred_at DESC);
+CREATE INDEX IF NOT EXISTS activity_actor_idx    ON activity_log (actor_id);
+CREATE INDEX IF NOT EXISTS activity_action_idx   ON activity_log (action);
+CREATE INDEX IF NOT EXISTS activity_entity_idx   ON activity_log (entity_type, entity_id);
 `;
 
 export async function migrate() {
@@ -110,7 +134,7 @@ export async function migrate() {
 
   try {
     await query(SCHEMA);
-    console.log('  → Base PostgreSQL prête (tables shipments, addresses)');
+    console.log('  → Base PostgreSQL prête (shipments, addresses, activity_log)');
     return true;
   } catch (err) {
     // Une base injoignable ne doit pas empêcher les autres pages de fonctionner.

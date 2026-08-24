@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createPickup, cancelPickup, CONTAINER_CODES } from '../services/pickup.js';
 import { asyncHandler, badRequest, requireFields } from '../middleware/validate.js';
+import { log, ACTIONS } from '../services/activity.js';
 
 export const pickupRouter = Router();
 
@@ -61,6 +62,14 @@ pickupRouter.post(
       residential: Boolean(residential),
     });
 
+    await log(req, {
+      action: ACTIONS.PICKUP_CREATE,
+      entityType: 'pickup',
+      entityId: result.prn,
+      summary: `Enlèvement planifié le ${pickupDate} à ${address?.city || 'adresse inconnue'}`,
+      metadata: { prn: result.prn, pickupDate, readyTime, closeTime },
+    });
+
     res.status(201).json({ success: true, data: result });
   }),
 );
@@ -70,6 +79,16 @@ pickupRouter.delete(
   '/:prn',
   asyncHandler(async (req, res) => {
     const result = await cancelPickup(req.params.prn);
+
+    if (result.success) {
+      await log(req, {
+        action: ACTIONS.PICKUP_CANCEL,
+        entityType: 'pickup',
+        entityId: req.params.prn,
+        summary: `Enlèvement ${req.params.prn} annulé`,
+      });
+    }
+
     res.json({ success: result.success, data: result });
   }),
 );

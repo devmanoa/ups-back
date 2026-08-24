@@ -28,6 +28,9 @@ Le serveur écoute sur `http://localhost:3000`.
 | `PORT` | non | Port d'écoute (défaut `3000`) |
 | `CORS_ORIGIN` | non | Origines autorisées, séparées par des virgules (défaut `http://localhost:5173`) |
 | `SHIPPER_*` | pour Shipping | Adresse expéditeur par défaut |
+| `KEYCLOAK_URL` | non | Serveur Keycloak. Vide → actions journalisées sans auteur |
+| `KEYCLOAK_REALM` | non | Realm Keycloak (défaut `konitys`) |
+| `AUTH_REQUIRED` | non | `true` = jeton obligatoire sur toutes les routes (`/health` excepté) |
 
 **Environnements UPS :**
 - `test` → `https://wwwcie.ups.com` (bac à sable, aucune expédition réelle facturée)
@@ -73,6 +76,11 @@ Le serveur écoute sur `http://localhost:3000`.
 | `POST` | `/api/addresses/groups` | Crée un groupe |
 | `PUT` | `/api/addresses/groups/:id` | Renomme un groupe |
 | `DELETE` | `/api/addresses/groups/:id` | Supprime un groupe (les adresses sont conservées) |
+| `GET` | `/api/activity` | Journal d'activité : qui a fait quoi, filtrable |
+| `GET` | `/api/activity/actors` | Auteurs distincts, pour le filtre |
+| `GET` | `/api/activity/summary` | Répartition des actions sur une période |
+| `GET` | `/api/batches` | Lots d'envoi groupé (« commandes ») avec leur avancement |
+| `GET` | `/api/batches/:batchId` | Détail d'un lot et de ses colis |
 
 ### Historique des envois
 
@@ -117,6 +125,51 @@ réécrit jamais l'historique.
 | Nom (`label`) | Unique parmi les adresses actives ; l'archivage libère le nom |
 | Tri | Adresse par défaut d'abord, puis les plus utilisées (`usage_count`) |
 | Sans `DATABASE_URL` | Les routes renvoient 503 ; le reste de l'application fonctionne |
+
+### Journal d'activité (timeline)
+
+Trace **les actions de l'équipe dans l'application** : étiquettes créées,
+adresses ajoutées, envois annulés. À ne pas confondre avec l'historique UPS
+(`/api/tracking`, `/api/shipments`), qui retrace le parcours du colis.
+
+Seules les **écritures** sont journalisées : tracer les lectures noierait
+l'information utile.
+
+| Garantie | Détail |
+|---|---|
+| Ne fait jamais échouer l'action | Une étiquette créée est déjà facturée par UPS : un échec d'écriture du journal est avalé et signalé en console |
+| Résumé figé à l'écriture | Renommer une adresse plus tard ne réécrit pas le passé — c'est un journal, pas une vue |
+| Auteur recopié | `actor_name` est dupliqué, sans clé étrangère : Keycloak est la source d'identité, et un utilisateur supprimé n'efface pas l'histoire |
+| Sans authentification | Les actions sont enregistrées avec un auteur vide, affiché « Utilisateur inconnu » |
+
+Le filtre `action` accepte un préfixe : `?action=address` couvre
+`address.create`, `address.update`, `address.archive`…
+
+### Authentification Keycloak
+
+Le frontend envoie déjà un jeton `Bearer` ; ces variables déterminent ce que
+le backend en fait. Les jetons sont vérifiés (signature RS256, expiration,
+émetteur) contre les clés publiques du realm, mises en cache une heure.
+Aucune dépendance : `node:crypto` suffit.
+
+| `KEYCLOAK_URL` | `AUTH_REQUIRED` | Comportement |
+|---|---|---|
+| absent | — | Aucun contrôle, actions journalisées sans auteur |
+| présent | `false` (défaut) | Jeton vérifié s'il est fourni, sinon la requête passe |
+| présent | `true` | Jeton obligatoire, `401` sinon |
+
+> `/health` reste toujours joignable sans jeton : le healthcheck Coolify ne
+> doit pas dépendre de Keycloak.
+>
+> Passez `AUTH_REQUIRED=true` seulement après avoir vérifié que le client
+> Keycloak fonctionne, sinon toute l'application devient inaccessible.
+
+### Commandes (lots d'envoi groupé)
+
+Chaque appel à `/api/shipping/bulk` produit un `batch_id`. Les routes
+`/api/batches` agrègent ces envois : aucune table dédiée, donc aucun état
+supplémentaire à maintenir en cohérence. Un lot est dit terminé quand tous
+ses colis sont livrés ou annulés.
 
 ### Détection d'anomalies
 
@@ -214,14 +267,18 @@ src/
 │   ├── tracking.js        Suivi
 │   ├── rating.js          Tarifs
 │   ├── shipping.js        Étiquettes
-│   └── locator.js         Points relais
+│   ├── locator.js         Points relais
+│   ├── keycloak.js        Vérification des jetons JWT (JWKS en cache)
+│   └── activity.js        Journalisation des actions
 ├── db/
 │   ├── pool.js            Pool PostgreSQL partagé (optionnel)
 │   ├── migrate.js         Schéma créé au démarrage, idempotent
 │   ├── shipmentsRepository.js   Historique des envois
-│   └── addressesRepository.js   Carnet d'adresses partagé
+│   ├── addressesRepository.js   Carnet d'adresses partagé
+│   ├── activityRepository.js    Journal d'activité
+│   └── batchesRepository.js     Lots d'envoi groupé (agrégation)
 ├── routes/                Routes Express + validation d'entrée
-└── middleware/            Validation et gestion d'erreurs
+└── middleware/            Validation, authentification, gestion d'erreurs
 ```
 
 Le jeton OAuth (valable ~4 h) est mis en cache et renouvelé automatiquement une minute

@@ -15,6 +15,7 @@ import {
 } from '../db/addressesRepository.js';
 import { isDbEnabled } from '../db/pool.js';
 import { asyncHandler, badRequest, requireFields } from '../middleware/validate.js';
+import { log, ACTIONS } from '../services/activity.js';
 
 export const addressesRouter = Router();
 
@@ -64,7 +65,16 @@ addressesRouter.post(
     if (!name) throw badRequest('Le nom du groupe ne peut pas être vide.');
 
     try {
-      res.status(201).json({ success: true, data: await createGroup({ name }) });
+      const group = await createGroup({ name });
+
+      await log(req, {
+        action: ACTIONS.GROUP_CREATE,
+        entityType: 'group',
+        entityId: group.id,
+        summary: `Groupe d'adresses « ${group.name} » créé`,
+      });
+
+      res.status(201).json({ success: true, data: group });
     } catch (err) {
       if (err.code === UNIQUE_VIOLATION) {
         throw badRequest(`Un groupe nommé « ${name} » existe déjà.`, ['name']);
@@ -91,6 +101,14 @@ addressesRouter.put(
     try {
       const group = await updateGroup(id, patch);
       if (!group) throw notFoundError('Groupe introuvable.');
+
+      await log(req, {
+        action: ACTIONS.GROUP_UPDATE,
+        entityType: 'group',
+        entityId: group.id,
+        summary: `Groupe d'adresses « ${group.name} » modifié`,
+      });
+
       res.json({ success: true, data: group });
     } catch (err) {
       if (err.code === UNIQUE_VIOLATION) {
@@ -110,6 +128,14 @@ addressesRouter.delete(
   asyncHandler(async (req, res) => {
     const group = await deleteGroup(parseId(req.params.id, 'groupe'));
     if (!group) throw notFoundError('Groupe introuvable.');
+
+    await log(req, {
+      action: ACTIONS.GROUP_DELETE,
+      entityType: 'group',
+      entityId: group.id,
+      summary: `Groupe d'adresses « ${group.name} » supprimé`,
+    });
+
     res.json({
       success: true,
       data: group,
@@ -140,7 +166,17 @@ addressesRouter.post(
   asyncHandler(async (req, res) => {
     const input = await validateAddressInput(req.body, { partial: false });
     try {
-      res.status(201).json({ success: true, data: await createAddress(input) });
+      const address = await createAddress(input);
+
+      await log(req, {
+        action: ACTIONS.ADDRESS_CREATE,
+        entityType: 'address',
+        entityId: address.id,
+        summary: `Adresse « ${address.label} » ajoutée au carnet`,
+        metadata: { city: address.city, country: address.country, groupId: address.groupId },
+      });
+
+      res.status(201).json({ success: true, data: address });
     } catch (err) {
       throw translateWriteError(err, input.label);
     }
@@ -167,6 +203,16 @@ addressesRouter.put(
     try {
       const address = await updateAddress(id, input);
       if (!address) throw notFoundError('Adresse introuvable.');
+
+      await log(req, {
+        action: ACTIONS.ADDRESS_UPDATE,
+        entityType: 'address',
+        entityId: address.id,
+        summary: `Adresse « ${address.label} » modifiée`,
+        // Les champs touchés situent la modification sans dupliquer l'adresse.
+        metadata: { fields: Object.keys(input) },
+      });
+
       res.json({ success: true, data: address });
     } catch (err) {
       throw translateWriteError(err, input.label);
@@ -181,6 +227,14 @@ addressesRouter.delete(
     const hard = req.query.hard === 'true';
     const address = await archiveAddress(parseId(req.params.id, 'adresse'), { hard });
     if (!address) throw notFoundError('Adresse introuvable ou déjà archivée.');
+
+    await log(req, {
+      action: hard ? ACTIONS.ADDRESS_DELETE : ACTIONS.ADDRESS_ARCHIVE,
+      entityType: 'address',
+      entityId: address.id,
+      summary: `Adresse « ${address.label} » ${hard ? 'supprimée' : 'archivée'}`,
+    });
+
     res.json({
       success: true,
       data: address,
@@ -196,6 +250,14 @@ addressesRouter.post(
     try {
       const address = await restoreAddress(parseId(req.params.id, 'adresse'));
       if (!address) throw notFoundError('Adresse introuvable.');
+
+      await log(req, {
+        action: ACTIONS.ADDRESS_RESTORE,
+        entityType: 'address',
+        entityId: address.id,
+        summary: `Adresse « ${address.label} » restaurée`,
+      });
+
       res.json({ success: true, data: address });
     } catch (err) {
       if (err.code === UNIQUE_VIOLATION) {

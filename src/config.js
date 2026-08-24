@@ -33,6 +33,16 @@ export const config = {
     // Repli quand UPS n'a pas fourni de date de livraison prévue.
     fallbackDelayDays: Number(process.env.ANOMALY_FALLBACK_DELAY_DAYS) || 7,
   },
+  // === Authentification Keycloak ===
+  // Le frontend envoie déjà un jeton Bearer ; sans KEYCLOAK_URL il est ignoré.
+  // AUTH_REQUIRED=true rejette les appels non authentifiés : à n'activer
+  // qu'une fois le client Keycloak vérifié, sinon toute l'application devient
+  // inaccessible.
+  auth: {
+    keycloakUrl: (process.env.KEYCLOAK_URL || '').trim().replace(/\/$/, ''),
+    realm: (process.env.KEYCLOAK_REALM || 'konitys').trim(),
+    required: process.env.AUTH_REQUIRED === 'true',
+  },
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
     .split(',')
     .map((o) => o.trim())

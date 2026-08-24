@@ -13,6 +13,10 @@ import { pickupRouter } from './routes/pickup.js';
 import { paperlessRouter } from './routes/paperless.js';
 import { shipmentsRouter } from './routes/shipments.js';
 import { addressesRouter } from './routes/addresses.js';
+import { activityRouter } from './routes/activity.js';
+import { batchesRouter } from './routes/batches.js';
+import { attachActor } from './middleware/auth.js';
+import { jwksStatus } from './services/keycloak.js';
 import { migrate } from './db/migrate.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { asyncHandler } from './middleware/validate.js';
@@ -33,8 +37,14 @@ app.get('/health', (req, res) => {
     accountConfigured: Boolean(config.accountNumber),
     apiVersions: API_VERSIONS,
     token: tokenStatus(),
+    auth: jwksStatus(),
   });
 });
+
+// Identifie l'appelant à partir du jeton Keycloak, pour nommer les auteurs
+// dans le journal d'activité. Placé après /health, qui doit rester joignable
+// sans authentification pour le healthcheck Coolify.
+app.use(attachActor);
 
 /** Vérifie que les identifiants UPS fonctionnent réellement. */
 app.get(
@@ -56,6 +66,8 @@ app.use('/api/pickup', pickupRouter);
 app.use('/api/paperless', paperlessRouter);
 app.use('/api/shipments', shipmentsRouter);
 app.use('/api/addresses', addressesRouter);
+app.use('/api/activity', activityRouter);
+app.use('/api/batches', batchesRouter);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -76,6 +88,15 @@ app.listen(config.port, '0.0.0.0', () => {
   }
   if (!config.accountNumber) {
     console.warn(`  ⚠  UPS_ACCOUNT_NUMBER absent — Shipping et tarifs négociés indisponibles`);
+  }
+
+  if (!config.auth.keycloakUrl) {
+    console.warn(`  ⚠  KEYCLOAK_URL absent — actions journalisées sans auteur`);
+  } else {
+    console.log(
+      `  → Keycloak : realm ${config.auth.realm}` +
+        (config.auth.required ? ' (jeton obligatoire)' : ' (jeton vérifié si fourni)'),
+    );
   }
 
   console.log(`  → CORS autorisé pour : ${config.corsOrigin.join(', ')}`);

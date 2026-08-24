@@ -54,6 +54,9 @@ SHIPPER_ADDRESS_LINE=1 rue de la Paix
 SHIPPER_CITY=Paris
 SHIPPER_POSTAL_CODE=75002
 SHIPPER_COUNTRY=FR
+KEYCLOAK_URL=https://keycloak.orkessi.com
+KEYCLOAK_REALM=konitys
+AUTH_REQUIRED=false
 ```
 
 > **`CORS_ORIGIN` est le réglage le plus critique.** Il doit contenir l'URL exacte du
@@ -64,9 +67,27 @@ SHIPPER_COUNTRY=FR
 
 ---
 
+### Authentification et journal d'activité
+
+`KEYCLOAK_URL` sert à **nommer les auteurs dans la timeline**. Sans elle, les actions
+sont enregistrées mais affichées « Utilisateur inconnu ». Utilisez le même serveur et
+le même realm que `VITE_KEYCLOAK_URL` côté frontend.
+
+`AUTH_REQUIRED=false` (le défaut) est le réglage sûr : les jetons sont vérifiés
+quand ils sont présents, mais aucune requête n'est rejetée.
+
+> **N'activez `AUTH_REQUIRED=true` qu'après avoir vérifié que la connexion fonctionne.**
+> En cas d'erreur de realm ou de client, toutes les routes répondraient `401` et
+> l'application deviendrait inutilisable. `/health` reste toujours joignable, donc
+> le healthcheck Coolify resterait vert malgré la panne.
+>
+> Une fois activé, les routes de l'API ne sont plus accessibles sans jeton valide —
+> c'est le seul réglage qui ferme l'API à qui en connaît l'URL.
+
 ### Base PostgreSQL
 
-Les pages « Envois en cours » et « Carnet d'adresses » nécessitent une base : UPS ne
+Les pages « Envois en cours », « Carnet d'adresses », « Timeline » et « Commandes »
+nécessitent une base : UPS ne
 permet pas de relire les expéditions déjà créées, ni de stocker un référentiel
 d'adresses.
 
@@ -78,7 +99,8 @@ Laissez `DATABASE_SSL=false` pour une base Coolify (réseau interne) ; passez à
 pour une base managée externe (Neon, Supabase…).
 
 > Sans `DATABASE_URL`, le reste de l'application fonctionne normalement : seules les
-> pages « Envois en cours », « Envoi groupé » et « Carnet d'adresses » sont inopérantes.
+> pages « Envois en cours », « Envoi groupé », « Carnet d'adresses », « Timeline » et
+> « Commandes » sont inopérantes.
 
 ---
 
@@ -151,6 +173,9 @@ sinon la connexion échouera. Dans la console Keycloak :
 | « Authentification requise » à l'écran | Client Keycloak inexistant ou realm erroné | Vérifiez que `ups-management` existe dans le realm `konitys` |
 | Header/sidebar différents de la plateforme | `VITE_PLATEFORM_URL` absente ou injoignable | Normal : les composants locaux prennent le relais. Renseignez la variable pour utiliser ceux de la plateforme |
 | Pas de suggestions d'adresse | `VITE_GOOGLE_MAPS_API_KEY` absente, API Places non activée, ou domaine non autorisé | Vérifiez la clé, activez l'API Places et ajoutez le domaine dans les restrictions HTTP referrers |
+| Timeline vide alors que des actions ont eu lieu | `DATABASE_URL` absent au moment des actions | Le journal n'est écrit qu'avec une base ; les actions passées sont perdues |
+| Timeline : « Utilisateur inconnu » partout | `KEYCLOAK_URL` absent côté backend | Ajoutez la variable ; les actions déjà enregistrées restent sans auteur |
+| Toutes les routes répondent 401 | `AUTH_REQUIRED=true` avec un realm ou un client erroné | Repassez à `false`, vérifiez le client Keycloak, puis réactivez |
 
 ---
 
