@@ -86,8 +86,8 @@ quand ils sont présents, mais aucune requête n'est rejetée.
 
 ### Base PostgreSQL
 
-Les pages « Envois en cours », « Carnet d'adresses », « Timeline » et « Commandes »
-nécessitent une base : UPS ne
+Les pages « Envois en cours », « Carnet d'adresses », « Types de colis », « Timeline »
+et « Commandes » nécessitent une base : UPS ne
 permet pas de relire les expéditions déjà créées, ni de stocker un référentiel
 d'adresses.
 
@@ -99,8 +99,8 @@ Laissez `DATABASE_SSL=false` pour une base Coolify (réseau interne) ; passez à
 pour une base managée externe (Neon, Supabase…).
 
 > Sans `DATABASE_URL`, le reste de l'application fonctionne normalement : seules les
-> pages « Envois en cours », « Envoi groupé », « Carnet d'adresses », « Timeline » et
-> « Commandes » sont inopérantes.
+> pages « Envois en cours », « Envoi groupé », « Carnet d'adresses », « Types de colis »,
+> « Timeline » et « Commandes » sont inopérantes.
 
 ---
 

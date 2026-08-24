@@ -3,6 +3,7 @@ import { createShipment, voidShipment, LABEL_FORMATS } from '../services/shippin
 import { SERVICE_CODES } from '../services/rating.js';
 import { getTransitTimes } from '../services/timeInTransit.js';
 import { saveShipment, markVoided } from '../db/shipmentsRepository.js';
+import { findByLabel } from '../db/packageTypesRepository.js';
 import { isDbEnabled } from '../db/pool.js';
 import { asyncHandler, badRequest, requireFields, validatePackages } from '../middleware/validate.js';
 import { log, ACTIONS, describeRecipient } from '../services/activity.js';
@@ -145,6 +146,11 @@ shippingRouter.post(
       );
     }
 
+    // Une ligne peut nommer un type de colis au lieu de répéter son poids :
+    // résolu ici, avant la validation, pour que l'absence de poids soit
+    // signalée par le type introuvable plutôt que par un champ manquant.
+    await resolvePackageTypes(shipments);
+
     // Validation complète avant le premier appel : mieux vaut tout refuser
     // que créer la moitié des étiquettes puis échouer.
     shipments.forEach((s, i) => {
@@ -218,6 +224,49 @@ shippingRouter.post(
     });
   }),
 );
+
+/**
+ * Remplace les `packageType` nommés par les caractéristiques du catalogue.
+ *
+ * Les valeurs déjà présentes sur la ligne l'emportent : un poids explicite
+ * dans le CSV reste prioritaire sur celui du type, ce qui permet de traiter
+ * un cas particulier sans créer un type dédié.
+ *
+ * Sans base, la mention est ignorée : les lignes portant leur propre poids
+ * restent valides.
+ */
+async function resolvePackageTypes(shipments) {
+  if (!isDbEnabled()) return;
+
+  const cache = new Map();
+
+  for (const [index, entry] of shipments.entries()) {
+    for (const pkg of entry?.packages ?? []) {
+      const label = pkg?.packageType;
+      if (!label) continue;
+
+      const key = String(label).toLowerCase();
+      if (!cache.has(key)) cache.set(key, await findByLabel(String(label)));
+
+      const type = cache.get(key);
+      if (!type) {
+        throw badRequest(
+          `shipments[${index}] — type de colis « ${label} » introuvable dans le catalogue.`,
+        );
+      }
+
+      pkg.weight = pkg.weight || type.weight;
+      pkg.length = pkg.length || type.length || undefined;
+      pkg.width = pkg.width || type.width || undefined;
+      pkg.height = pkg.height || type.height || undefined;
+      pkg.description = pkg.description || type.description || undefined;
+      pkg.packagingType = pkg.packagingType || type.packagingType;
+      pkg.reference = pkg.reference || type.reference || undefined;
+
+      delete pkg.packageType;
+    }
+  }
+}
 
 /** DELETE /api/shipping/:shipmentId — annule une expédition */
 shippingRouter.delete(

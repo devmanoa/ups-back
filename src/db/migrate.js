@@ -124,6 +124,36 @@ CREATE INDEX IF NOT EXISTS activity_occurred_idx ON activity_log (occurred_at DE
 CREATE INDEX IF NOT EXISTS activity_actor_idx    ON activity_log (actor_id);
 CREATE INDEX IF NOT EXISTS activity_action_idx   ON activity_log (action);
 CREATE INDEX IF NOT EXISTS activity_entity_idx   ON activity_log (entity_type, entity_id);
+
+-- Catalogue de types de colis : le matériel expédié régulièrement (DS620,
+-- QW410, bornes...) avec son poids et ses dimensions, pour éviter de les
+-- ressaisir à chaque envoi.
+CREATE TABLE IF NOT EXISTS package_types (
+  id             BIGSERIAL PRIMARY KEY,
+  label          TEXT NOT NULL,
+  -- Seul le poids est obligatoire, comme dans le formulaire : UPS n'exige
+  -- les dimensions que si les trois sont fournies.
+  weight         NUMERIC(10,3) NOT NULL,
+  length         NUMERIC(10,2),
+  width          NUMERIC(10,2),
+  height         NUMERIC(10,2),
+  description    TEXT,
+  packaging_type TEXT NOT NULL DEFAULT '02',
+  reference      TEXT,
+  is_default     BOOLEAN NOT NULL DEFAULT FALSE,
+  usage_count    INTEGER NOT NULL DEFAULT 0,
+  last_used_at   TIMESTAMPTZ,
+  archived_at    TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Deux types actifs de meme nom rendraient le selecteur ambigu.
+CREATE UNIQUE INDEX IF NOT EXISTS package_types_label_uniq
+  ON package_types (LOWER(label)) WHERE archived_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS package_types_usage_idx
+  ON package_types (usage_count DESC, last_used_at DESC);
 `;
 
 export async function migrate() {
@@ -134,7 +164,7 @@ export async function migrate() {
 
   try {
     await query(SCHEMA);
-    console.log('  → Base PostgreSQL prête (shipments, addresses, activity_log)');
+    console.log('  → Base PostgreSQL prête (shipments, addresses, activity_log, package_types)');
     return true;
   } catch (err) {
     // Une base injoignable ne doit pas empêcher les autres pages de fonctionner.

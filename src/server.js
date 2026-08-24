@@ -15,6 +15,7 @@ import { shipmentsRouter } from './routes/shipments.js';
 import { addressesRouter } from './routes/addresses.js';
 import { activityRouter } from './routes/activity.js';
 import { batchesRouter } from './routes/batches.js';
+import { packageTypesRouter } from './routes/packageTypes.js';
 import { attachActor } from './middleware/auth.js';
 import { jwksStatus } from './services/keycloak.js';
 import { migrate } from './db/migrate.js';
@@ -68,6 +69,7 @@ app.use('/api/shipments', shipmentsRouter);
 app.use('/api/addresses', addressesRouter);
 app.use('/api/activity', activityRouter);
 app.use('/api/batches', batchesRouter);
+app.use('/api/package-types', packageTypesRouter);
 
 app.use(notFound);
 app.use(errorHandler);

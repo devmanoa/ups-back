@@ -1,0 +1,198 @@
+/**
+ * POST /api/shipping/bulk — résolution des types de colis nommés.
+ *
+ * Une ligne peut désigner « DS620 » au lieu de répéter son poids ; le
+ * catalogue et UPS sont simulés par des mocks de modules.
+ */
+import { test, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+
+const src = (p) => pathToFileURL(path.resolve(import.meta.dirname, '../src', p)).href;
+
+const CATALOGUE = {
+  ds620: {
+    id: 1,
+    label: 'DS620',
+    weight: '12.5',
+    length: '45',
+    width: '35',
+    height: '30',
+    description: 'Imprimante photo DS620',
+    packagingType: '02',
+    reference: null,
+  },
+  'borne spherik': {
+    id: 2,
+    label: 'Borne Spherik',
+    weight: '80',
+    length: '',
+    width: '',
+    height: '',
+    description: null,
+    packagingType: '30',
+    reference: null,
+  },
+};
+
+/** Colis transmis à UPS, capturés pour les assertions. */
+const sentPackages = [];
+
+mock.module(src('db/packageTypesRepository.js'), {
+  namedExports: {
+    findByLabel: async (label) => CATALOGUE[String(label).toLowerCase()] ?? null,
+  },
+});
+
+mock.module(src('services/shipping.js'), {
+  namedExports: {
+    LABEL_FORMATS: { GIF: { code: 'GIF', mime: 'image/gif', ext: 'gif' } },
+    createShipment: async ({ packages }) => {
+      sentPackages.push(...packages);
+      return {
+        shipmentIdentificationNumber: '1ZBULK000000000',
+        packages: [{ trackingNumber: '1ZBULK000000001' }],
+        totalCharges: 10,
+        currency: 'EUR',
+      };
+    },
+    voidShipment: async () => ({ success: true }),
+  },
+});
+
+mock.module(src('db/shipmentsRepository.js'), {
+  namedExports: { saveShipment: async () => [], markVoided: async () => null },
+});
+
+mock.module(src('db/pool.js'), {
+  namedExports: { isDbEnabled: () => true, query: async () => ({ rows: [] }) },
+});
+
+mock.module(src('services/activity.js'), {
+  namedExports: {
+    log: async () => {},
+    ACTIONS: { BULK_CREATE: 'bulk.create', SHIPMENT_CREATE: 'shipment.create', SHIPMENT_VOID: 'shipment.void' },
+    describeRecipient: () => 'destinataire',
+  },
+});
+
+const { shippingRouter } = await import(src('routes/shipping.js'));
+const { errorHandler } = await import(src('middleware/errorHandler.js'));
+const { default: express } = await import('express');
+
+async function startServer(t) {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/shipping', shippingRouter);
+  app.use(errorHandler);
+
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, () => resolve(s));
+  });
+  t.after(() => server.close());
+
+  const port = server.address().port;
+  return async (body) => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/shipping/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+}
+
+const shipTo = {
+  name: 'Antenne Lyon',
+  addressLine1: '10 rue Victor Hugo',
+  city: 'Lyon',
+  postalCode: '69001',
+  country: 'FR',
+};
+
+test('un type nommé fournit poids et dimensions', async (t) => {
+  sentPackages.length = 0;
+  const call = await startServer(t);
+
+  const res = await call({
+    shipments: [{ shipTo, packages: [{ packageType: 'DS620' }] }],
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(sentPackages[0].weight, '12.5');
+  assert.equal(sentPackages[0].length, '45');
+  assert.equal(sentPackages[0].description, 'Imprimante photo DS620');
+  // Le nom du type ne doit pas partir chez UPS.
+  assert.equal(sentPackages[0].packageType, undefined);
+});
+
+test('la casse du nom est ignorée', async (t) => {
+  sentPackages.length = 0;
+  const call = await startServer(t);
+
+  const res = await call({
+    shipments: [{ shipTo, packages: [{ packageType: 'ds620' }] }],
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(sentPackages[0].weight, '12.5');
+});
+
+test('une valeur explicite l emporte sur celle du type', async (t) => {
+  sentPackages.length = 0;
+  const call = await startServer(t);
+
+  const res = await call({
+    shipments: [{ shipTo, packages: [{ packageType: 'DS620', weight: '20' }] }],
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(sentPackages[0].weight, '20', 'le poids de la ligne doit primer');
+  assert.equal(sentPackages[0].length, '45', 'les autres champs viennent du type');
+});
+
+test('le code d emballage du type est transmis (palette)', async (t) => {
+  sentPackages.length = 0;
+  const call = await startServer(t);
+
+  const res = await call({
+    shipments: [{ shipTo, packages: [{ packageType: 'Borne Spherik' }] }],
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(sentPackages[0].weight, '80');
+  assert.equal(sentPackages[0].packagingType, '30');
+  // Dimensions absentes du catalogue : rien ne doit être inventé.
+  assert.equal(sentPackages[0].length, undefined);
+});
+
+test('un type introuvable est signalé avant toute création', async (t) => {
+  sentPackages.length = 0;
+  const call = await startServer(t);
+
+  const res = await call({
+    shipments: [
+      { shipTo, packages: [{ packageType: 'DS620' }] },
+      { shipTo, packages: [{ packageType: 'Inexistant' }] },
+    ],
+  });
+
+  assert.equal(res.status, 400);
+  assert.match(res.body.error.message, /Inexistant/);
+  assert.match(res.body.error.message, /introuvable/);
+  // Rien ne doit être facturé si une ligne est invalide.
+  assert.equal(sentPackages.length, 0, 'aucune étiquette ne doit être créée');
+});
+
+test('sans type nommé, le comportement d origine est inchangé', async (t) => {
+  sentPackages.length = 0;
+  const call = await startServer(t);
+
+  const res = await call({
+    shipments: [{ shipTo, packages: [{ weight: '2' }] }],
+  });
+
+  assert.equal(res.status, 201);
+  assert.equal(sentPackages[0].weight, '2');
+});

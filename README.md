@@ -81,6 +81,13 @@ Le serveur écoute sur `http://localhost:3000`.
 | `GET` | `/api/activity/summary` | Répartition des actions sur une période |
 | `GET` | `/api/batches` | Lots d'envoi groupé (« commandes ») avec leur avancement |
 | `GET` | `/api/batches/:batchId` | Détail d'un lot et de ses colis |
+| `GET` | `/api/package-types` | Catalogue des types de colis, avec recherche |
+| `POST` | `/api/package-types` | Enregistre un type (poids obligatoire) |
+| `PUT` | `/api/package-types/:id` | Modifie un type |
+| `DELETE` | `/api/package-types/:id` | Archive un type (`?hard=true` pour supprimer) |
+| `POST` | `/api/package-types/:id/restore` | Restaure un type archivé |
+| `POST` | `/api/package-types/:id/use` | Enregistre une utilisation (tri par fréquence) |
+| `GET` | `/api/package-types/packaging-codes` | Codes d'emballage UPS acceptés |
 
 ### Historique des envois
 
@@ -125,6 +132,46 @@ réécrit jamais l'historique.
 | Nom (`label`) | Unique parmi les adresses actives ; l'archivage libère le nom |
 | Tri | Adresse par défaut d'abord, puis les plus utilisées (`usage_count`) |
 | Sans `DATABASE_URL` | Les routes renvoient 503 ; le reste de l'application fonctionne |
+
+### Types de colis
+
+Catalogue du matériel expédié régulièrement (DS620, QW410, bornes…) avec son
+poids et ses dimensions, pour ne plus les ressaisir à chaque envoi.
+
+**Seul le poids est obligatoire** — même règle que le formulaire de saisie. UPS
+ne prend en compte les dimensions que si les trois sont fournies, donc un type
+sans dimensions reste parfaitement utilisable.
+
+Comme le carnet d'adresses, aucune clé étrangère ne relie ce catalogue aux
+envois : `shipments` recopie le poids à la création. Corriger le poids d'un type
+ne réécrit donc jamais l'historique.
+
+| Comportement | Détail |
+|---|---|
+| Suppression | Archivage restaurable ; `?hard=true` supprime réellement |
+| Nom (`label`) | Unique parmi les types actifs ; l'archivage libère le nom |
+| Tri | Type par défaut d'abord, puis les plus utilisés |
+| Code d'emballage | `02` (colis client) par défaut ; `30` pour une palette, etc. |
+| Sans `DATABASE_URL` | Les routes renvoient 503, sauf `/packaging-codes` qui est une liste fixe |
+
+#### Types nommés dans l'envoi groupé
+
+Une ligne de `/api/shipping/bulk` peut désigner un type au lieu de répéter ses
+caractéristiques :
+
+```json
+{ "shipTo": { }, "packages": [{ "packageType": "DS620" }] }
+```
+
+Le poids, les dimensions, la description et le code d'emballage sont alors lus
+dans le catalogue. Trois règles :
+
+- **Une valeur explicite l'emporte** sur celle du type : un poids indiqué sur la
+  ligne reste prioritaire, ce qui permet de traiter un cas particulier sans
+  créer un type dédié.
+- **Un type introuvable fait échouer tout le lot**, avant la première création :
+  mieux vaut tout refuser que facturer la moitié des étiquettes.
+- **La casse est ignorée** : `ds620` et `DS620` désignent le même type.
 
 ### Journal d'activité (timeline)
 
@@ -269,12 +316,14 @@ src/
 │   ├── shipping.js        Étiquettes
 │   ├── locator.js         Points relais
 │   ├── keycloak.js        Vérification des jetons JWT (JWKS en cache)
+│   ├── packaging.js       Codes d'emballage UPS
 │   └── activity.js        Journalisation des actions
 ├── db/
 │   ├── pool.js            Pool PostgreSQL partagé (optionnel)
 │   ├── migrate.js         Schéma créé au démarrage, idempotent
 │   ├── shipmentsRepository.js   Historique des envois
 │   ├── addressesRepository.js   Carnet d'adresses partagé
+│   ├── packageTypesRepository.js Catalogue des types de colis
 │   ├── activityRepository.js    Journal d'activité
 │   └── batchesRepository.js     Lots d'envoi groupé (agrégation)
 ├── routes/                Routes Express + validation d'entrée

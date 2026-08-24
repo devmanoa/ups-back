@@ -26,6 +26,11 @@ export const ACTIONS = {
   GROUP_DELETE: 'group.delete',
   PICKUP_CREATE: 'pickup.create',
   PICKUP_CANCEL: 'pickup.cancel',
+  PACKAGE_TYPE_CREATE: 'package_type.create',
+  PACKAGE_TYPE_UPDATE: 'package_type.update',
+  PACKAGE_TYPE_ARCHIVE: 'package_type.archive',
+  PACKAGE_TYPE_RESTORE: 'package_type.restore',
+  PACKAGE_TYPE_DELETE: 'package_type.delete',
 };
 
 /**
