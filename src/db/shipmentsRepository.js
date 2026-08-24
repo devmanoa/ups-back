@@ -16,8 +16,17 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
   for (const pkg of shipment.packages) {
     // Un doublon (rejeu) ne doit pas faire échouer l'appel : l'étiquette UPS
     // existe déjà et le client doit la recevoir.
+    //
+    // La comparaison porte aussi sur `shipment_id` : en environnement CIE,
+    // UPS renvoie le même numéro factice (1ZXXXXXXXXXXXXXXXX) pour tous les
+    // colis d'une expédition. Sans cette condition, le colis 2 serait pris
+    // pour un rejeu du colis 1 et les colis suivants disparaîtraient de
+    // l'historique — l'envoi n'apparaîtrait qu'avec le poids du premier.
     const existing = pkg.trackingNumber
-      ? await query('SELECT * FROM shipments WHERE tracking_number = $1', [pkg.trackingNumber])
+      ? await query(
+          'SELECT * FROM shipments WHERE tracking_number = $1 AND shipment_id <> $2',
+          [pkg.trackingNumber, shipment.shipmentIdentificationNumber],
+        )
       : { rows: [] };
 
     if (existing.rows.length > 0) {
@@ -100,16 +109,26 @@ export async function listShipments({ search, status, batchId, from, to, limit =
 
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+  // Une ligne par expédition, pas par colis : `saveShipment` écrit une ligne
+  // par colis, et un envoi de trois colis apparaîtrait trois fois dans
+  // l'historique. Le représentant est le premier colis inséré ;
+  // `package_count` indique combien il y en a.
   const { rows: countRows } = await query(
-    `SELECT COUNT(*)::int AS total FROM shipments ${where}`,
+    `SELECT COUNT(DISTINCT shipment_id)::int AS total FROM shipments ${where}`,
     params,
   );
 
   params.push(limit, offset);
   const { rows } = await query(
-    `SELECT * FROM shipments ${where}
-     ORDER BY created_at DESC
-     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    `WITH filtered AS (
+       SELECT *, COUNT(*) OVER (PARTITION BY shipment_id)::int AS package_count,
+              ROW_NUMBER() OVER (PARTITION BY shipment_id ORDER BY id ASC) AS rn
+         FROM shipments ${where}
+     )
+     SELECT * FROM filtered
+      WHERE rn = 1
+      ORDER BY created_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
 
@@ -361,6 +380,8 @@ function toShipment(row) {
     deliveredAt: row.delivered_at,
     batchId: row.batch_id,
     createdAt: row.created_at,
+    // Présent uniquement sur les listes regroupées par expédition.
+    ...(row.package_count != null ? { packageCount: Number(row.package_count) } : {}),
   };
 }
 
