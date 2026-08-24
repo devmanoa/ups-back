@@ -5,6 +5,7 @@ import {
   getShipmentByTracking,
   updateStatus,
   countByStatus,
+  getStats,
   getLabel,
 } from '../db/shipmentsRepository.js';
 import { withAnomalies, summarize } from '../services/anomalies.js';
@@ -140,8 +141,18 @@ shipmentsRouter.get(
 shipmentsRouter.get(
   '/stats',
   asyncHandler(async (req, res) => {
-    const counts = await countByStatus();
-    res.json({ success: true, data: { counts, dbEnabled: isDbEnabled() } });
+    if (!isDbEnabled()) {
+      return res.json({ success: true, data: { counts: {}, dbEnabled: false } });
+    }
+
+    const { from, to } = req.query;
+    if (from && Number.isNaN(Date.parse(from))) throw badRequest('Paramètre "from" invalide.');
+    if (to && Number.isNaN(Date.parse(to))) throw badRequest('Paramètre "to" invalide.');
+
+    // `counts` est conservé : le tableau de bord s'en sert déjà.
+    const [counts, stats] = await Promise.all([countByStatus(), getStats({ from, to })]);
+
+    res.json({ success: true, data: { counts, stats, dbEnabled: true } });
   }),
 );
 

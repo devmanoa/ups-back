@@ -178,6 +178,135 @@ export async function countByStatus() {
   return rows.reduce((acc, r) => ({ ...acc, [r.status]: r.count }), {});
 }
 
+/**
+ * Indicateurs chiffrés sur une période : coûts, volumes, répartitions.
+ *
+ * Attention au calcul du coût : `saveShipment` écrit une ligne par colis, et
+ * chacune porte le total de l'expédition entière. Sommer `total_charges`
+ * multiplierait le coût d'un envoi multi-colis par son nombre de colis. Les
+ * montants sont donc agrégés par `shipment_id` avant d'être additionnés.
+ */
+export async function getStats({ from, to } = {}) {
+  const conditions = ["status <> 'voided'"];
+  const params = [];
+
+  if (from) {
+    params.push(from);
+    conditions.push(`created_at >= $${params.length}`);
+  }
+  if (to) {
+    params.push(to);
+    conditions.push(`created_at < ($${params.length}::date + INTERVAL '1 day')`);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
+  // Même période, mais tous statuts confondus : sert au décompte par statut,
+  // où les annulations doivent apparaître.
+  const periodConditions = [];
+  const periodParams = [];
+
+  if (from) {
+    periodParams.push(from);
+    periodConditions.push(`created_at >= $${periodParams.length}`);
+  }
+  if (to) {
+    periodParams.push(to);
+    periodConditions.push(`created_at < ($${periodParams.length}::date + INTERVAL '1 day')`);
+  }
+
+  const periodWhere = periodConditions.length ? `WHERE ${periodConditions.join(' AND ')}` : '';
+
+  // Une expédition = un shipment_id, quel que soit son nombre de colis.
+  const perShipment = `
+    SELECT shipment_id,
+           MAX(total_charges) AS charges,
+           MAX(currency)      AS currency,
+           MIN(created_at)    AS created_at,
+           COUNT(*)::int      AS package_count
+      FROM shipments ${where}
+     GROUP BY shipment_id`;
+
+  const [totals, byService, byDay, statuses, delays] = await Promise.all([
+    query(
+      `SELECT COUNT(*)::int                       AS shipment_count,
+              COALESCE(SUM(package_count), 0)::int AS package_count,
+              COALESCE(SUM(charges), 0)           AS total_cost,
+              AVG(charges)                        AS average_cost,
+              MAX(currency)                       AS currency
+         FROM (${perShipment}) s`,
+      params,
+    ),
+    query(
+      `SELECT COALESCE(service_name, 'Service inconnu') AS service,
+              COUNT(DISTINCT shipment_id)::int         AS shipment_count,
+              COALESCE(SUM(charges), 0)                AS total_cost
+         FROM (
+           SELECT shipment_id, service_name,
+                  MAX(total_charges) AS charges
+             FROM shipments ${where}
+            GROUP BY shipment_id, service_name
+         ) s
+        GROUP BY service
+        ORDER BY total_cost DESC`,
+      params,
+    ),
+    query(
+      `SELECT DATE(created_at)            AS day,
+              COUNT(*)::int               AS shipment_count,
+              COALESCE(SUM(charges), 0)   AS total_cost
+         FROM (${perShipment}) s
+        GROUP BY day
+        ORDER BY day ASC`,
+      params,
+    ),
+    // Les annulations sont exclues des coûts mais restent comptées ici :
+    // savoir combien d'envois ont été annulés a son intérêt. Ce filtre
+    // reprend donc la période sans exclure aucun statut.
+    query(
+      `SELECT status, COUNT(DISTINCT shipment_id)::int AS count
+         FROM shipments
+        ${periodWhere}
+        GROUP BY status`,
+      periodParams,
+    ),
+    // Délai réel de livraison, pour les envois arrivés à destination.
+    query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (delivered_at - created_at)) / 86400) AS avg_days,
+              COUNT(*)::int                                                AS delivered_count
+         FROM (
+           SELECT DISTINCT ON (shipment_id) shipment_id, created_at, delivered_at
+             FROM shipments ${where} AND delivered_at IS NOT NULL
+         ) s`,
+      params,
+    ),
+  ]);
+
+  const t = totals.rows[0];
+  const d = delays.rows[0];
+
+  return {
+    shipmentCount: t.shipment_count,
+    packageCount: t.package_count,
+    totalCost: Number(t.total_cost) || 0,
+    averageCost: t.average_cost != null ? Number(t.average_cost) : null,
+    currency: t.currency || 'EUR',
+    averageDeliveryDays: d.avg_days != null ? Number(d.avg_days) : null,
+    deliveredCount: d.delivered_count,
+    byStatus: statuses.rows.reduce((acc, r) => ({ ...acc, [r.status]: r.count }), {}),
+    byService: byService.rows.map((r) => ({
+      service: r.service,
+      shipmentCount: r.shipment_count,
+      totalCost: Number(r.total_cost) || 0,
+    })),
+    byDay: byDay.rows.map((r) => ({
+      day: new Date(r.day).toISOString().slice(0, 10),
+      shipmentCount: r.shipment_count,
+      totalCost: Number(r.total_cost) || 0,
+    })),
+  };
+}
+
 /** Convertit une ligne SQL en objet exploitable par le front. */
 function toShipment(row) {
   return {

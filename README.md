@@ -60,7 +60,7 @@ Le serveur écoute sur `http://localhost:3000`.
 | `POST` | `/api/paperless/link` | Rattachement d'un document à une expédition |
 | `POST` | `/api/shipping/bulk` | Création groupée (50 expéditions max) |
 | `GET` | `/api/shipments` | Historique paginé, avec recherche et filtres |
-| `GET` | `/api/shipments/stats` | Répartition par statut |
+| `GET` | `/api/shipments/stats` | Indicateurs chiffrés : coûts, volumes, délais (`?from=&to=`) |
 | `GET` | `/api/shipments/anomalies` | Envois en retard, en incident ou immobiles |
 | `POST` | `/api/shipments/refresh-status` | Actualise les statuts colis par colis (Tracking) |
 | `POST` | `/api/shipments/sync` | Actualise tous les statuts en un appel (QuantumView) |
@@ -132,6 +132,25 @@ réécrit jamais l'historique.
 | Nom (`label`) | Unique parmi les adresses actives ; l'archivage libère le nom |
 | Tri | Adresse par défaut d'abord, puis les plus utilisées (`usage_count`) |
 | Sans `DATABASE_URL` | Les routes renvoient 503 ; le reste de l'application fonctionne |
+
+### Indicateurs chiffrés
+
+`GET /api/shipments/stats` accepte `from` et `to` et renvoie, en plus des
+compteurs par statut : coût total et moyen, nombre d'expéditions et de colis,
+délai moyen de livraison réel, et les répartitions par service et par jour.
+
+**Le calcul du coût mérite une explication.** `saveShipment` écrit *une ligne
+par colis*, et chacune porte le total de l'expédition entière — c'est ce que
+renvoie l'API Shipping. Sommer `total_charges` multiplierait donc le coût d'un
+envoi de trois colis par trois. Les montants sont agrégés par `shipment_id`
+avant d'être additionnés.
+
+| Règle | Détail |
+|---|---|
+| Unité de coût | L'expédition, pas le colis : un envoi multi-colis compte pour un |
+| Annulations | Exclues des coûts, mais comptées dans la répartition par statut |
+| Délai moyen | Écart réel entre création et livraison, sur les envois livrés seulement |
+| Sans `DATABASE_URL` | La route répond `dbEnabled: false` sans indicateurs, plutôt qu'en erreur |
 
 ### Enlèvements et colis rattachés
 
