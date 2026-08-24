@@ -362,11 +362,24 @@ shipmentsRouter.get(
  * Déclaré avant `/:trackingNumber` : Express retient la première route qui
  * correspond, et le motif générique capterait « .../comments » sinon.
  */
+/**
+ * Ramène un identifiant d'URL à la clé sous laquelle les commentaires sont
+ * rangés.
+ *
+ * L'URL peut porter un numéro de suivi ou l'identifiant local selon
+ * l'environnement. Sans cette résolution, un commentaire écrit depuis une URL
+ * à UUID serait relu sous le numéro de suivi — et resterait invisible.
+ */
+async function commentKey(identifier) {
+  const shipment = await getShipmentByTracking(identifier).catch(() => null);
+  return shipment?.localShipmentId ?? identifier;
+}
+
 shipmentsRouter.get(
   '/:trackingNumber/comments',
   asyncHandler(async (req, res) => {
     requireDb();
-    const comments = await listComments(req.params.trackingNumber);
+    const comments = await listComments(await commentKey(req.params.trackingNumber));
     res.json({ success: true, data: { comments, count: comments.length } });
   }),
 );
@@ -391,7 +404,7 @@ shipmentsRouter.post(
     }
 
     const comment = await addComment({
-      trackingNumber: req.params.trackingNumber,
+      trackingNumber: await commentKey(req.params.trackingNumber),
       body,
       actor: req.actor,
     });
@@ -453,7 +466,7 @@ shipmentsRouter.get(
       listActivity({ entityType: 'shipment', entityId: shipment.trackingNumber, limit: 100 })
         .then((r) => r.entries)
         .catch(() => []),
-      listComments(shipment.trackingNumber).catch(() => []),
+      listComments(shipment.localShipmentId).catch(() => []),
       // Les colis frères de la même expédition : sans eux, un envoi de trois
       // colis n'en montrerait qu'un.
       listPackagesOfShipment(shipment.localShipmentId).catch(() => [shipment]),

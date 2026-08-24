@@ -292,3 +292,19 @@ test('une liste sans texte reste acceptee', async (t) => {
   });
   assert.equal(status, 201);
 });
+
+test('un commentaire ecrit par UUID se relit dans le detail', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  // Le bug corrige : l'ecriture utilisait le parametre d'URL (un UUID) et la
+  // lecture le numero de suivi. Le commentaire restait invisible.
+  await call('POST', '/api/shipments/1Z999/comments', { body: 'Visible ?' });
+
+  const detail = await call('GET', '/api/shipments/1Z999');
+  assert.equal(detail.body.data.comments.length, 1, 'le commentaire doit apparaitre');
+  assert.equal(detail.body.data.comments[0].body, 'Visible ?');
+
+  const list = await call('GET', '/api/shipments/1Z999/comments');
+  assert.equal(list.body.data.comments.length, 1, 'et dans la liste dediee');
+});
