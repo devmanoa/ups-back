@@ -259,3 +259,36 @@ test('un envoi inconnu renvoie 404', async (t) => {
   assert.equal(status, 404);
   assert.equal(body.error.code, 'SHIPMENT_NOT_FOUND');
 });
+
+test('un commentaire enrichi conserve sa mise en forme', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const { status, body } = await call('POST', '/api/shipments/1Z999/comments', {
+    body: '<b>Client</b> prevenu, <i>rappeler demain</i>',
+  });
+
+  assert.equal(status, 201);
+  assert.match(body.data.body, /<b>Client<\/b>/);
+});
+
+test('un editeur vide envoie du HTML sans texte : refuse', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  // trim() ne suffit pas : ces corps ne sont pas vides au sens des chaines.
+  for (const empty of ['<p></p>', '<br>', '<div><br></div>', '&nbsp;']) {
+    const { status } = await call('POST', '/api/shipments/1Z999/comments', { body: empty });
+    assert.equal(status, 400, `« ${empty} » doit etre refuse`);
+  }
+});
+
+test('une liste sans texte reste acceptee', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const { status } = await call('POST', '/api/shipments/1Z999/comments', {
+    body: '<ul><li>Point</li></ul>',
+  });
+  assert.equal(status, 201);
+});

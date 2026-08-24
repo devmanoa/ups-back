@@ -378,7 +378,14 @@ shipmentsRouter.post(
     requireDb();
 
     const body = String(req.body?.body ?? '').trim();
-    if (!body) throw badRequest('Le commentaire ne peut pas être vide.');
+
+    // Le corps est du HTML enrichi : un éditeur vidé laisse un `<p></p>` ou
+    // un `<br>`, non vide au sens de trim() mais sans aucun contenu. On juge
+    // donc sur le texte débarrassé de ses balises.
+    const text = body.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').trim();
+    if (!text && !/<li[\s>]/i.test(body)) {
+      throw badRequest('Le commentaire ne peut pas être vide.');
+    }
     if (body.length > MAX_BODY) {
       throw badRequest(`Le commentaire dépasse ${MAX_BODY} caractères.`);
     }
