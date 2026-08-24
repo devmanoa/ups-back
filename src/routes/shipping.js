@@ -23,6 +23,9 @@ shippingRouter.post(
       labelFormat = 'GIF',
       paymentAccountNumber,
       accessPointLocationId,
+      // Antenne d'origine, quand la page a été ouverte depuis un lien
+      // Antennes. Purement informatif : rien n'est envoyé à UPS.
+      antenne,
     } = req.body;
 
     if (!shipTo) throw badRequest('Le champ "shipTo" est obligatoire.');
@@ -55,6 +58,7 @@ shippingRouter.post(
       description,
       labelFormat,
       accessPointLocationId,
+      antenne,
     });
 
     const tracking = result.packages?.[0]?.trackingNumber;

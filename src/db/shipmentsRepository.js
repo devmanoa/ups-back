@@ -25,7 +25,7 @@ export function isPlaceholderTracking(trackingNumber) {
  * Enregistre les colis d'une expédition. Un envoi multi-colis produit
  * une ligne par numéro de suivi.
  */
-export async function saveShipment({ shipment, shipTo, serviceCode, serviceName, description, labelFormat, accessPointLocationId, batchId, expectedDelivery, transitDays }) {
+export async function saveShipment({ shipment, shipTo, serviceCode, serviceName, description, labelFormat, accessPointLocationId, batchId, expectedDelivery, transitDays, antenne }) {
   const rows = [];
 
   // Identifiant d'expédition propre à notre base, attribué ici.
@@ -61,8 +61,8 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
          recipient_postal, recipient_country, reference, description,
          total_charges, currency, billing_weight, label_format, label_base64,
          access_point_id, batch_id, expected_delivery, transit_days,
-         local_shipment_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+         local_shipment_id, antenne_contact_id, antenne_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
        RETURNING *`,
       [
         shipment.shipmentIdentificationNumber,
@@ -87,6 +87,8 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
         expectedDelivery || null,
         transitDays ?? null,
         localShipmentId,
+        antenne?.contactId ?? null,
+        antenne?.antenneId ?? null,
       ],
     );
     rows.push(inserted[0]);
@@ -420,6 +422,11 @@ function toShipment(row) {
     // liens de détail doivent porter, l'identifiant UPS ne distinguant pas
     // les envois en CIE.
     localShipmentId: row.local_shipment_id ?? row.shipment_id,
+    // Antenne d'origine, quand l'étiquette vient d'un lien Antennes.
+    antenne:
+      row.antenne_contact_id != null
+        ? { contactId: Number(row.antenne_contact_id), antenneId: row.antenne_id != null ? Number(row.antenne_id) : null }
+        : null,
     createdAt: row.created_at,
     // Présent uniquement sur les listes regroupées par expédition.
     ...(row.package_count != null ? { packageCount: Number(row.package_count) } : {}),

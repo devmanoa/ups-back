@@ -16,6 +16,7 @@ import { addressesRouter } from './routes/addresses.js';
 import { activityRouter } from './routes/activity.js';
 import { batchesRouter } from './routes/batches.js';
 import { packageTypesRouter } from './routes/packageTypes.js';
+import { antennesRouter } from './routes/antennes.js';
 import { attachActor } from './middleware/auth.js';
 import { jwksStatus } from './services/keycloak.js';
 import { migrate } from './db/migrate.js';
@@ -70,6 +71,7 @@ app.use('/api/addresses', addressesRouter);
 app.use('/api/activity', activityRouter);
 app.use('/api/batches', batchesRouter);
 app.use('/api/package-types', packageTypesRouter);
+app.use('/api/antennes', antennesRouter);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -90,6 +92,12 @@ app.listen(config.port, '0.0.0.0', () => {
   }
   if (!config.accountNumber) {
     console.warn(`  ⚠  UPS_ACCOUNT_NUMBER absent — Shipping et tarifs négociés indisponibles`);
+  }
+
+  if (config.antennes.apiUrl && config.antennes.token) {
+    console.log(`  → Antennes : ${config.antennes.apiUrl}`);
+  } else {
+    console.warn(`  ⚠  ANTENNES_API_URL / ANTENNES_WS_TOKEN absents — /shipping?antenne= inopérant`);
   }
 
   if (!config.auth.keycloakUrl) {

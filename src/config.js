@@ -43,6 +43,14 @@ export const config = {
     realm: (process.env.KEYCLOAK_REALM || 'konitys').trim(),
     required: process.env.AUTH_REQUIRED === 'true',
   },
+  // === Application Antennes ===
+  // Un lien depuis Antennes ouvre la page Étiquettes avec l'adresse de
+  // l'antenne préremplie. Le jeton reste ici : le transmettre dans l'URL du
+  // navigateur le laisserait dans l'historique, les journaux et le Referer.
+  antennes: {
+    apiUrl: (process.env.ANTENNES_API_URL || '').trim().replace(/\/$/, ''),
+    token: (process.env.ANTENNES_WS_TOKEN || '').trim(),
+  },
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
     .split(',')
     .map((o) => o.trim())

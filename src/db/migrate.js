@@ -68,6 +68,15 @@ ALTER TABLE shipments ADD COLUMN IF NOT EXISTS picked_up_at      TIMESTAMPTZ;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS delivered_at      TIMESTAMPTZ;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS local_shipment_id TEXT;
 
+-- Antenne d'origine, quand l'étiquette a été créée depuis un lien Antennes.
+-- Sans clé étrangère : les antennes vivent dans une autre application, et
+-- leur suppression ne doit pas effacer notre historique d'envois.
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS antenne_contact_id INTEGER;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS antenne_id         INTEGER;
+
+CREATE INDEX IF NOT EXISTS shipments_antenne_idx ON shipments (antenne_id)
+  WHERE antenne_id IS NOT NULL;
+
 -- Reprise des lignes antérieures à cette colonne. Les envois CIE partagent
 -- un shipment_id factice : les regrouper par (shipment_id, created_at à la
 -- seconde près) sépare des expéditions distinctes créées à des moments
