@@ -89,6 +89,8 @@ shippingRouter.post(
       labelFormat,
       accessPointLocationId,
       antenne,
+      // Expéditeur réellement utilisé par UPS, figé sur l'envoi.
+      shipper: result.shipper,
     });
 
     const tracking = result.packages?.[0]?.trackingNumber;
@@ -232,6 +234,7 @@ shippingRouter.post(
           labelFormat,
           accessPointLocationId: entry.accessPointLocationId,
           batchId,
+          shipper: created.shipper,
         });
 
         results.push({ index, ok: true, recipient: entry.shipTo.name, shipment: created });

@@ -25,7 +25,7 @@ export function isPlaceholderTracking(trackingNumber) {
  * Enregistre les colis d'une expédition. Un envoi multi-colis produit
  * une ligne par numéro de suivi.
  */
-export async function saveShipment({ shipment, shipTo, serviceCode, serviceName, description, labelFormat, accessPointLocationId, batchId, expectedDelivery, transitDays, antenne }) {
+export async function saveShipment({ shipment, shipTo, serviceCode, serviceName, description, labelFormat, accessPointLocationId, batchId, expectedDelivery, transitDays, antenne, shipper }) {
   const rows = [];
 
   // Identifiant d'expédition propre à notre base, attribué ici.
@@ -61,8 +61,9 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
          recipient_postal, recipient_country, reference, description,
          total_charges, currency, billing_weight, label_format, label_base64,
          access_point_id, batch_id, expected_delivery, transit_days,
-         local_shipment_id, antenne_contact_id, antenne_id
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+         local_shipment_id, antenne_contact_id, antenne_id,
+         shipper_name, shipper_address, shipper_city, shipper_postal, shipper_country
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
        RETURNING *`,
       [
         shipment.shipmentIdentificationNumber,
@@ -89,6 +90,11 @@ export async function saveShipment({ shipment, shipTo, serviceCode, serviceName,
         localShipmentId,
         antenne?.contactId ?? null,
         antenne?.antenneId ?? null,
+        shipper?.name || null,
+        [shipper?.addressLine1, shipper?.addressLine].find(Boolean) || null,
+        shipper?.city || null,
+        shipper?.postalCode || null,
+        shipper?.country || null,
       ],
     );
     rows.push(inserted[0]);
@@ -396,6 +402,17 @@ function toShipment(row) {
       postalCode: row.recipient_postal,
       country: row.recipient_country,
     },
+    // Adresse de départ figée à la création : les envois antérieurs à ces
+    // colonnes n'en ont pas, d'où le null plutôt qu'un objet vide.
+    shipper: row.shipper_name
+      ? {
+          name: row.shipper_name,
+          address: row.shipper_address,
+          city: row.shipper_city,
+          postalCode: row.shipper_postal,
+          country: row.shipper_country,
+        }
+      : null,
     reference: row.reference,
     description: row.description,
     totalCharges: row.total_charges != null ? Number(row.total_charges) : null,

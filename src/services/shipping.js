@@ -124,7 +124,10 @@ export async function createShipment({
   };
 
   const data = await upsFetch(`/shipments/${V}/ship`, { method: 'POST', body });
-  return normalizeShipment(data, format);
+
+  // L'expéditeur retenu remonte avec le résultat : c'est lui qui sera figé
+  // sur l'envoi, et il vient soit de la requête, soit de la configuration.
+  return { ...normalizeShipment(data, format), shipper };
 }
 
 /**

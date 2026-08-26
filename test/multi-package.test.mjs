@@ -37,6 +37,8 @@ mock.module(src('db/pool.js'), {
           billing_weight: params[14],
           total_charges: params[12],
           local_shipment_id: params[21],
+          shipper_name: params[24],
+          shipper_city: params[26],
         };
         rows.push(row);
         return { rows: [row] };
@@ -202,4 +204,22 @@ test('chaque envoi recoit un identifiant local distinct', async () => {
   const ids = new Set(rows.map((r) => r.local_shipment_id));
   assert.equal(ids.size, 2, 'meme shipment_id UPS, deux identifiants locaux');
   assert.ok([...ids].every(Boolean), 'aucun identifiant local vide');
+});
+
+test('l adresse d expedition est figee sur l envoi', async () => {
+  reset();
+
+  await saveShipment({
+    shipment: {
+      shipmentIdentificationNumber: '1ZSHIP_X',
+      packages: [{ trackingNumber: '1ZXXXXXXXXXXXXXXXX' }],
+    },
+    shipTo: { name: 'Destinataire' },
+    // Recopiee a la creation : si SHIPPER_* change demain, cet envoi doit
+    // garder l'adresse d'ou il est reellement parti.
+    shipper: { name: 'SAS KONITYS', addressLine: '2 place Konrad Adenauer', city: 'Plerin' },
+  });
+
+  assert.equal(rows[0].shipper_name, 'SAS KONITYS');
+  assert.equal(rows[0].shipper_city, 'Plerin');
 });

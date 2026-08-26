@@ -71,6 +71,16 @@ ALTER TABLE shipments ADD COLUMN IF NOT EXISTS local_shipment_id TEXT;
 -- Antenne d'origine, quand l'étiquette a été créée depuis un lien Antennes.
 -- Sans clé étrangère : les antennes vivent dans une autre application, et
 -- leur suppression ne doit pas effacer notre historique d'envois.
+-- Adresse d'expédition figée à la création. Elle vit dans les variables
+-- SHIPPER_*, qui changeraient en cas de déménagement : sans copie, tous les
+-- envois passés afficheraient rétroactivement la nouvelle adresse, alors
+-- qu'ils sont bel et bien partis de l'ancienne.
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipper_name    TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipper_address TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipper_city    TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipper_postal  TEXT;
+ALTER TABLE shipments ADD COLUMN IF NOT EXISTS shipper_country TEXT;
+
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS antenne_contact_id INTEGER;
 ALTER TABLE shipments ADD COLUMN IF NOT EXISTS antenne_id         INTEGER;
 
