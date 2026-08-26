@@ -5,6 +5,7 @@ import { SERVICE_CODES } from '../services/rating.js';
 import { getTransitTimes } from '../services/timeInTransit.js';
 import { saveShipment, markVoided } from '../db/shipmentsRepository.js';
 import { findByLabel } from '../db/packageTypesRepository.js';
+import { listAddresses } from '../db/addressesRepository.js';
 import { isDbEnabled } from '../db/pool.js';
 import { asyncHandler, badRequest, requireFields, validatePackages } from '../middleware/validate.js';
 import { log, ACTIONS, describeRecipient } from '../services/activity.js';
@@ -21,6 +22,39 @@ export const shippingRouter = Router();
 shippingRouter.get(
   '/shipper',
   asyncHandler(async (req, res) => {
+    // Le carnet prime : une adresse marquée « départ par défaut » se change
+    // depuis l'interface, là où SHIPPER_* exige un redéploiement.
+    if (isDbEnabled()) {
+      try {
+        const { addresses } = await listAddresses({});
+        const preferred = addresses.find((a) => a.isDefaultShipper);
+        if (preferred) {
+          return res.json({
+            success: true,
+            data: {
+              shipper: {
+                name: preferred.name,
+                attentionName: preferred.attentionName ?? '',
+                addressLine: preferred.addressLine1,
+                city: preferred.city,
+                postalCode: preferred.postalCode,
+                state: preferred.state ?? '',
+                country: preferred.country,
+              },
+              source: 'address-book',
+              addressId: preferred.id,
+              configured: true,
+              missing: [],
+            },
+          });
+        }
+      } catch (err) {
+        // Le carnet indisponible ne doit pas priver l'application de son
+        // adresse de départ : on retombe sur la configuration.
+        console.warn('[shipping] Carnet injoignable pour l’expéditeur :', err.message);
+      }
+    }
+
     const { name, attentionName, addressLine, city, postalCode, state, country } = config.shipper;
 
     // UPS refuse une expédition sans ces champs : autant le dire ici plutôt
@@ -33,6 +67,8 @@ shippingRouter.get(
       success: true,
       data: {
         shipper: { name, attentionName, addressLine, city, postalCode, state, country },
+        source: 'config',
+        addressId: null,
         configured: missing.length === 0,
         missing,
       },

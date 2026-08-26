@@ -73,15 +73,16 @@ export async function getAddress(id) {
 export async function createAddress(input) {
   return withTransaction(async (client) => {
     if (input.isDefault) await clearDefault(client, input.groupId ?? null);
+    if (input.isDefaultShipper) await clearDefaultShipper(client);
 
     const values = FIELDS.map((f) => columnValue(f, input));
     const placeholders = FIELDS.map((_, i) => `$${i + 1}`).join(', ');
 
     const { rows } = await client.query(
-      `INSERT INTO addresses (${FIELDS.join(', ')}, is_default)
-       VALUES (${placeholders}, $${FIELDS.length + 1})
+      `INSERT INTO addresses (${FIELDS.join(', ')}, is_default, is_default_shipper)
+       VALUES (${placeholders}, $${FIELDS.length + 1}, $${FIELDS.length + 2})
        RETURNING *`,
-      [...values, Boolean(input.isDefault)],
+      [...values, Boolean(input.isDefault), Boolean(input.isDefaultShipper)],
     );
     return toAddress(rows[0]);
   });
@@ -114,6 +115,12 @@ export async function updateAddress(id, input) {
       sets.push(`is_default = $${params.length}`);
     }
 
+    if (input.isDefaultShipper !== undefined) {
+      if (input.isDefaultShipper) await clearDefaultShipper(client, id);
+      params.push(Boolean(input.isDefaultShipper));
+      sets.push(`is_default_shipper = $${params.length}`);
+    }
+
     if (!sets.length) return toAddress(current);
 
     sets.push('updated_at = NOW()');
@@ -135,7 +142,9 @@ export async function archiveAddress(id, { hard = false } = {}) {
   const { rows } = hard
     ? await query('DELETE FROM addresses WHERE id = $1 RETURNING *', [id])
     : await query(
-        `UPDATE addresses SET archived_at = NOW(), is_default = FALSE, updated_at = NOW()
+        // Une adresse archivée ne peut plus être le point de départ par défaut.
+        `UPDATE addresses SET archived_at = NOW(), is_default = FALSE,
+                is_default_shipper = FALSE, updated_at = NOW()
          WHERE id = $1 AND archived_at IS NULL RETURNING *`,
         [id],
       );
@@ -249,6 +258,24 @@ async function clearDefault(client, groupId, exceptId = null) {
   await client.query(`UPDATE addresses SET is_default = FALSE WHERE ${where}`, params);
 }
 
+/**
+ * Retire le défaut d'expédition des autres adresses.
+ *
+ * Global et non par groupe, contrairement au défaut destinataire : on part
+ * d'un endroit habituel, pas d'un par catégorie d'adresses.
+ */
+async function clearDefaultShipper(client, exceptId) {
+  const params = [];
+  let where = 'is_default_shipper AND archived_at IS NULL';
+
+  if (exceptId) {
+    params.push(exceptId);
+    where += ` AND id <> $${params.length}`;
+  }
+
+  await client.query(`UPDATE addresses SET is_default_shipper = FALSE WHERE ${where}`, params);
+}
+
 /** Un identifiant de groupe vide vaut « sans groupe », pas 0. */
 function normalizeGroupId(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -287,6 +314,8 @@ function toAddress(row) {
     country: row.country,
     residential: row.residential,
     isDefault: row.is_default,
+    /** Point de départ retenu par défaut, distinct du défaut destinataire. */
+    isDefaultShipper: row.is_default_shipper ?? false,
     usageCount: row.usage_count,
     lastUsedAt: row.last_used_at,
     archivedAt: row.archived_at,

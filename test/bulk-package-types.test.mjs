@@ -66,7 +66,13 @@ mock.module(src('db/shipmentsRepository.js'), {
 });
 
 mock.module(src('db/pool.js'), {
-  namedExports: { isDbEnabled: () => true, query: async () => ({ rows: [] }) },
+  namedExports: {
+    isDbEnabled: () => true,
+    query: async () => ({ rows: [] }),
+    // Le mock remplace tout le module : un export manquant casse l'import
+    // du routeur, même si ce test ne s'en sert pas.
+    withTransaction: async (fn) => fn({ query: async () => ({ rows: [] }) }),
+  },
 });
 
 mock.module(src('services/activity.js'), {

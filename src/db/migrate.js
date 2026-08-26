@@ -153,6 +153,17 @@ CREATE TABLE IF NOT EXISTS addresses (
 CREATE UNIQUE INDEX IF NOT EXISTS addresses_label_uniq
   ON addresses (LOWER(label)) WHERE archived_at IS NULL;
 
+-- Adresse de départ retenue par défaut. Distincte de la colonne is_default,
+-- qui vaut pour le destinataire : une même adresse peut être le point de
+-- départ habituel sans être le destinataire habituel, et inversement.
+ALTER TABLE addresses ADD COLUMN IF NOT EXISTS is_default_shipper BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Une seule adresse de départ par défaut : deux rendraient le choix arbitraire.
+-- L'index porte sur une constante, filtré aux seules lignes marquées : c'est
+-- la façon d'exiger « au plus une ligne vérifiant cette condition ».
+CREATE UNIQUE INDEX IF NOT EXISTS addresses_default_shipper_uniq
+  ON addresses ((TRUE)) WHERE is_default_shipper AND archived_at IS NULL;
+
 CREATE INDEX IF NOT EXISTS addresses_group_idx ON addresses (group_id)
   WHERE archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS addresses_usage_idx
