@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { config } from '../config.js';
 import { createShipment, voidShipment, LABEL_FORMATS } from '../services/shipping.js';
 import { SERVICE_CODES } from '../services/rating.js';
 import { getTransitTimes } from '../services/timeInTransit.js';
@@ -9,6 +10,35 @@ import { asyncHandler, badRequest, requireFields, validatePackages } from '../mi
 import { log, ACTIONS, describeRecipient } from '../services/activity.js';
 
 export const shippingRouter = Router();
+
+/**
+ * GET /api/shipping/shipper — adresse d'expédition par défaut.
+ *
+ * Elle vient des variables SHIPPER_* et n'apparaissait nulle part dans
+ * l'interface : rien ne disait d'où le colis partait, ni que l'adresse
+ * était incomplète. Le téléphone n'est pas exposé, il ne sert qu'à UPS.
+ */
+shippingRouter.get(
+  '/shipper',
+  asyncHandler(async (req, res) => {
+    const { name, attentionName, addressLine, city, postalCode, state, country } = config.shipper;
+
+    // UPS refuse une expédition sans ces champs : autant le dire ici plutôt
+    // que de laisser l'utilisateur découvrir l'échec à la création.
+    const missing = ['name', 'addressLine', 'city', 'postalCode', 'country'].filter(
+      (key) => !config.shipper[key],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        shipper: { name, attentionName, addressLine, city, postalCode, state, country },
+        configured: missing.length === 0,
+        missing,
+      },
+    });
+  }),
+);
 
 /** POST /api/shipping — crée une expédition et son étiquette */
 shippingRouter.post(
