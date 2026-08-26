@@ -211,10 +211,20 @@ async function estimateDelivery({ shipTo, serviceCode, shipment }) {
 shippingRouter.post(
   '/bulk',
   asyncHandler(async (req, res) => {
-    const { shipments, labelFormat = 'GIF', serviceCode, description } = req.body;
+    // `shipFrom` vaut pour tout le lot : un envoi groupé part d'un seul
+    // endroit, et le répéter sur chaque ligne du CSV serait du bruit.
+    const { shipments, labelFormat = 'GIF', serviceCode, description, shipFrom } = req.body;
 
     if (!Array.isArray(shipments) || shipments.length === 0) {
       throw badRequest('Le champ "shipments" doit contenir au moins une expédition.');
+    }
+
+    if (shipFrom) {
+      requireFields(
+        shipFrom,
+        ['name', 'addressLine1', 'city', 'postalCode', 'country'],
+        'champ shipFrom',
+      );
     }
     if (shipments.length > 50) {
       throw badRequest('50 expéditions maximum par envoi groupé.');
@@ -255,6 +265,7 @@ shippingRouter.post(
       try {
         const created = await createShipment({
           shipTo: entry.shipTo,
+          shipFrom,
           packages: entry.packages,
           serviceCode: entryService,
           description: entry.description || description,

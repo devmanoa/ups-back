@@ -38,6 +38,8 @@ const CATALOGUE = {
 
 /** Colis transmis à UPS, capturés pour les assertions. */
 const sentPackages = [];
+/** Appels complets a createShipment : sert aux assertions sur shipFrom. */
+const shipmentCalls = [];
 
 mock.module(src('db/packageTypesRepository.js'), {
   namedExports: {
@@ -48,7 +50,9 @@ mock.module(src('db/packageTypesRepository.js'), {
 mock.module(src('services/shipping.js'), {
   namedExports: {
     LABEL_FORMATS: { GIF: { code: 'GIF', mime: 'image/gif', ext: 'gif' } },
-    createShipment: async ({ packages }) => {
+    createShipment: async (payload) => {
+      const { packages } = payload;
+      shipmentCalls.push(payload);
       sentPackages.push(...packages);
       return {
         shipmentIdentificationNumber: '1ZBULK000000000',
@@ -201,4 +205,45 @@ test('sans type nommé, le comportement d origine est inchangé', async (t) => {
 
   assert.equal(res.status, 201);
   assert.equal(sentPackages[0].weight, '2');
+});
+
+test('shipFrom vaut pour tout le lot', async (t) => {
+  shipmentCalls.length = 0;
+  const call = await startServer(t);
+
+  const { status } = await call({
+    shipFrom: {
+      name: 'Depot Lyon',
+      addressLine1: '9 rue A',
+      city: 'Lyon',
+      postalCode: '69001',
+      country: 'FR',
+    },
+    shipments: [
+      { shipTo: { name: 'A', addressLine1: '1 r', city: 'V', postalCode: '1', country: 'FR' }, packages: [{ weight: '1' }] },
+      { shipTo: { name: 'B', addressLine1: '2 r', city: 'V', postalCode: '2', country: 'FR' }, packages: [{ weight: '1' }] },
+    ],
+  });
+
+  assert.equal(status, 201);
+  // Les deux expeditions partent de la meme adresse : elle n'est saisie
+  // qu'une fois, au niveau du lot.
+  assert.equal(shipmentCalls.length, 2);
+  assert.equal(shipmentCalls[0].shipFrom.name, 'Depot Lyon');
+  assert.equal(shipmentCalls[1].shipFrom.name, 'Depot Lyon');
+});
+
+test('un shipFrom incomplet est refuse avant tout appel UPS', async (t) => {
+  shipmentCalls.length = 0;
+  const call = await startServer(t);
+
+  const { status } = await call({
+    shipFrom: { name: 'Sans adresse' },
+    shipments: [
+      { shipTo: { name: 'A', addressLine1: '1 r', city: 'V', postalCode: '1', country: 'FR' }, packages: [{ weight: '1' }] },
+    ],
+  });
+
+  assert.equal(status, 400);
+  assert.equal(shipmentCalls.length, 0, 'aucune etiquette ne doit etre creee');
 });
