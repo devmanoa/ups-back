@@ -50,7 +50,16 @@ mock.module(src('db/activityRepository.js'), {
   namedExports: {
     findCreator: async () => null,
     findCreators: async () => ({}),
-    listActivity: async () => ({ total: 0, entries: [] }),
+    // Journal de deux envois distincts : le mock filtre réellement, sinon le
+    // test ne prouverait rien sur le filtrage de la route.
+    listActivity: async ({ entityType, entityId }) => {
+      const all = [
+        { id: 1, entityType: 'shipment', entityId: 'local-1', summary: 'Cet envoi' },
+        { id: 2, entityType: 'shipment', entityId: 'local-2', summary: 'Un autre envoi' },
+      ];
+      const entries = all.filter((e) => e.entityType === entityType && e.entityId === entityId);
+      return { total: entries.length, entries };
+    },
   },
 });
 
@@ -339,4 +348,16 @@ test('un envoi sans etiquette renvoie 404', async (t) => {
   const { status, body } = await call('GET', '/api/shipments/1Z000/labels');
   assert.equal(status, 404);
   assert.equal(body.error.code, 'LABEL_NOT_FOUND');
+});
+
+test('le journal ne montre que les actions de cet envoi', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const { body } = await call('GET', '/api/shipments/1Z999');
+
+  // Filtre sur l'identifiant local : en CIE le numero de suivi est partage
+  // par tous les envois, et le journal les listerait tous.
+  assert.equal(body.data.activity.length, 1, 'un seul envoi concerne');
+  assert.equal(body.data.activity[0].summary, 'Cet envoi');
 });

@@ -92,13 +92,18 @@ shippingRouter.post(
     });
 
     const tracking = result.packages?.[0]?.trackingNumber;
+
+    // Journalisé sous l'identifiant local : en CIE tous les envois portent le
+    // même numéro de suivi factice, et le journal d'un envoi afficherait
+    // alors les actions de tous les autres.
     await log(req, {
       action: ACTIONS.SHIPMENT_CREATE,
       entityType: 'shipment',
-      entityId: tracking || result.shipmentIdentificationNumber,
+      entityId: saved.localShipmentId || tracking || result.shipmentIdentificationNumber,
       summary: `Étiquette ${tracking || result.shipmentIdentificationNumber} → ${describeRecipient(shipTo)}`,
       metadata: {
         shipmentId: result.shipmentIdentificationNumber,
+        trackingNumber: tracking ?? null,
         packageCount: result.packages?.length ?? 1,
         serviceCode,
         totalCharges: result.totalCharges ?? null,
@@ -106,7 +111,7 @@ shippingRouter.post(
       },
     });
 
-    res.status(201).json({ success: true, data: { ...result, saved } });
+    res.status(201).json({ success: true, data: { ...result, saved: saved.saved } });
   }),
 );
 
@@ -115,19 +120,21 @@ shippingRouter.post(
  * Retourne false si l'historique n'a pas pu être mis à jour.
  */
 async function persistShipment(payload) {
-  if (!isDbEnabled()) return false;
+  if (!isDbEnabled()) return { saved: false, localShipmentId: null };
   try {
     const estimate = await estimateDelivery(payload);
-    await saveShipment({
+    const rows = await saveShipment({
       ...payload,
       serviceName: SERVICE_CODES[payload.serviceCode] || null,
       expectedDelivery: estimate.expectedDelivery,
       transitDays: estimate.transitDays,
     });
-    return true;
+    // L'identifiant local remonte : c'est sous lui que le journal doit être
+    // écrit, le numéro de suivi ne distinguant pas les envois en CIE.
+    return { saved: true, localShipmentId: rows[0]?.localShipmentId ?? null };
   } catch (err) {
     console.error('[shipments] Enregistrement impossible :', err.message);
-    return false;
+    return { saved: false, localShipmentId: null };
   }
 }
 
@@ -313,21 +320,25 @@ shippingRouter.delete(
     const result = await voidShipment(req.params.shipmentId, trackingNumbers);
 
     // Reflète l'annulation dans l'historique, sans bloquer la réponse.
+    let voidedLocalId = null;
     if (result.success && isDbEnabled()) {
       try {
-        await markVoided(req.params.shipmentId);
+        const rows = await markVoided(req.params.shipmentId);
+        voidedLocalId = rows[0]?.localShipmentId ?? null;
       } catch (err) {
         console.error('[shipments] Mise à jour du statut annulé impossible :', err.message);
       }
     }
 
     if (result.success) {
+      // Même clé que la création : sans elle, l'annulation d'un envoi
+      // apparaîtrait dans le journal de tous les autres.
       await log(req, {
         action: ACTIONS.SHIPMENT_VOID,
         entityType: 'shipment',
-        entityId: req.params.shipmentId,
+        entityId: voidedLocalId || req.params.shipmentId,
         summary: `Expédition ${req.params.shipmentId} annulée`,
-        metadata: { trackingNumbers },
+        metadata: { trackingNumbers, shipmentId: req.params.shipmentId },
       });
     }
 
