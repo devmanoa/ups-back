@@ -60,9 +60,13 @@ export async function listActivity({
     params.push(entityType);
     conditions.push(`entity_type = $${params.length}`);
   }
-  if (entityId) {
-    params.push(String(entityId));
-    conditions.push(`entity_id = $${params.length}`);
+  // `entityId` accepte une liste : un envoi antérieur à l'identifiant local
+  // est journalisé sous son numéro de suivi, et ses deux identifiants
+  // désignent alors le même envoi.
+  const entityIds = [...new Set([entityId].flat().filter(Boolean).map(String))];
+  if (entityIds.length) {
+    params.push(entityIds);
+    conditions.push(`entity_id = ANY($${params.length})`);
   }
   if (from) {
     params.push(from);
@@ -143,18 +147,30 @@ export async function countByAction({ from, to } = {}) {
  * La table shipments ne porte pas d'auteur : le journal fait foi. Cela évite
  * une migration et couvre les envois déjà enregistrés, à condition que leur
  * ligne de journal existe.
+ *
+ * Plusieurs identifiants peuvent être proposés : un envoi enregistré avant
+ * l'ajout de l'identifiant local est journalisé sous son numéro de suivi. On
+ * accepte donc les deux, en retenant la ligne trouvée sous le premier
+ * identifiant fourni — le plus précis.
  */
 export async function findCreator(entityType, entityId) {
+  const candidates = [...new Set([entityId].flat().filter(Boolean).map(String))];
+  if (!candidates.length) return null;
+
   const { rows } = await query(
     // `$1 || '.create'` plutôt qu'un LIKE : « shipment.create » est une
     // création, « shipment.void » n'en est pas une, et un LIKE '%create%'
     // les confondrait au premier renommage d'action.
+    //
+    // Le tri suit l'ordre des candidats : array_position rend 1 pour le
+    // premier, et une ligne trouvée sous l'identifiant local prime ainsi sur
+    // celle trouvée sous le numéro de suivi, partagé en CIE.
     `SELECT actor_id, actor_name, actor_email, occurred_at
        FROM activity_log
-      WHERE entity_type = $1 AND entity_id = $2 AND action = $1 || '.create'
-      ORDER BY occurred_at ASC
+      WHERE entity_type = $1 AND entity_id = ANY($2) AND action = $1 || '.create'
+      ORDER BY array_position($2, entity_id), occurred_at ASC
       LIMIT 1`,
-    [entityType, String(entityId)],
+    [entityType, candidates],
   );
 
   const row = rows[0];

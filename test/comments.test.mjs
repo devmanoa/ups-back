@@ -48,7 +48,15 @@ mock.module(src('db/commentsRepository.js'), {
 
 mock.module(src('db/activityRepository.js'), {
   namedExports: {
-    findCreator: async () => null,
+    // Auteurs indexés par l'identifiant sous lequel le journal les a écrits.
+    // « 1Z999 » représente un envoi antérieur à l'identifiant local : sa seule
+    // ligne de journal porte le numéro de suivi.
+    findCreator: async (entityType, entityId) => {
+      const byId = { '1Z999': { id: 'u1', name: 'Sébastien', email: 's@x.fr' } };
+      const ids = [entityId].flat().filter(Boolean).map(String);
+      for (const id of ids) if (byId[id]) return byId[id];
+      return null;
+    },
     findCreators: async () => ({}),
     // Journal de deux envois distincts : le mock filtre réellement, sinon le
     // test ne prouverait rien sur le filtrage de la route.
@@ -57,7 +65,8 @@ mock.module(src('db/activityRepository.js'), {
         { id: 1, entityType: 'shipment', entityId: 'local-1', summary: 'Cet envoi' },
         { id: 2, entityType: 'shipment', entityId: 'local-2', summary: 'Un autre envoi' },
       ];
-      const entries = all.filter((e) => e.entityType === entityType && e.entityId === entityId);
+      const ids = [entityId].flat().filter(Boolean).map(String);
+      const entries = all.filter((e) => e.entityType === entityType && ids.includes(e.entityId));
       return { total: entries.length, entries };
     },
   },
@@ -88,6 +97,7 @@ mock.module(src('db/shipmentsRepository.js'), {
             { base64: 'BBB', format: 'GIF', trackingNumber: '1Z998' },
           ]
         : [],
+    isPlaceholderTracking: (t) => /X{6,}/i.test(String(t ?? '')),
   },
 });
 
@@ -348,6 +358,19 @@ test('un envoi sans etiquette renvoie 404', async (t) => {
   const { status, body } = await call('GET', '/api/shipments/1Z000/labels');
   assert.equal(status, 404);
   assert.equal(body.error.code, 'LABEL_NOT_FOUND');
+});
+
+test('l auteur est retrouve meme si le journal porte le numero de suivi', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const { body } = await call('GET', '/api/shipments/1Z999');
+
+  // Les envois anterieurs a l'identifiant local sont journalises sous leur
+  // numero de suivi. Ne chercher que l'identifiant local les afficherait
+  // « Utilisateur inconnu » dans le detail, alors que la liste, elle, trouve
+  // bien l'auteur.
+  assert.equal(body.data.creator?.name, 'Sébastien');
 });
 
 test('le journal ne montre que les actions de cet envoi', async (t) => {

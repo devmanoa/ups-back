@@ -9,6 +9,7 @@ import {
   getStats,
   getLabel,
   listLabelsOfShipment,
+  isPlaceholderTracking,
 } from '../db/shipmentsRepository.js';
 import {
   listComments,
@@ -480,13 +481,20 @@ shipmentsRouter.get(
       });
     }
 
+    // Sous quels identifiants le journal a pu enregistrer cet envoi :
+    // l'identifiant local d'abord, mais un envoi antérieur à son introduction
+    // n'a que son numéro de suivi. Le numéro factice de CIE est écarté : il
+    // est partagé par tous les envois et ramènerait le journal des autres.
+    const journalIds = [shipment.localShipmentId];
+    if (shipment.trackingNumber && !isPlaceholderTracking(shipment.trackingNumber)) {
+      journalIds.push(shipment.trackingNumber);
+    }
+
     // Le détail reste consultable même si une de ces lectures échoue : elles
     // enrichissent la page, elles ne la conditionnent pas.
     const [creator, activity, comments, packages] = await Promise.all([
-      findCreator('shipment', shipment.localShipmentId).catch(() => null),
-      // Filtré sur l'identifiant local, seul à désigner un envoi : en CIE, le
-      // numéro de suivi est partagé par tous et le journal les listerait tous.
-      listActivity({ entityType: 'shipment', entityId: shipment.localShipmentId, limit: 100 })
+      findCreator('shipment', journalIds).catch(() => null),
+      listActivity({ entityType: 'shipment', entityId: journalIds, limit: 100 })
         .then((r) => r.entries)
         .catch(() => []),
       listComments(shipment.localShipmentId).catch(() => []),

@@ -43,6 +43,7 @@ mock.module(src('db/shipmentsRepository.js'), {
     },
     getLabel: async () => null,
     listLabelsOfShipment: async () => [],
+    isPlaceholderTracking: (t) => /X{6,}/i.test(String(t ?? '')),
   },
 });
 
