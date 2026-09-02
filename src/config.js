@@ -11,6 +11,29 @@ if (!BASE_URLS[env]) {
   throw new Error(`UPS_ENV invalide: "${env}". Valeurs acceptées: test | production`);
 }
 
+/**
+ * Analyse API_KEYS : « antennes:cle-secrete,crm:autre-cle ».
+ *
+ * Le nom précède la clé pour que le journal nomme l'application appelante.
+ * Une entrée sans deux-points est ignorée plutôt que traitée comme une clé
+ * anonyme : mieux vaut une clé inopérante qu'une clé acceptée sans auteur.
+ */
+function parseApiKeys(raw) {
+  return (raw || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const at = entry.indexOf(':');
+      if (at <= 0) {
+        console.warn(`[config] API_KEYS : entrée ignorée, format attendu « nom:clé »`);
+        return null;
+      }
+      return { name: entry.slice(0, at).trim(), key: entry.slice(at + 1).trim() };
+    })
+    .filter((k) => k && k.name && k.key);
+}
+
 export const config = {
   env,
   baseUrl: BASE_URLS[env],
@@ -43,6 +66,12 @@ export const config = {
     realm: (process.env.KEYCLOAK_REALM || 'konitys').trim(),
     required: process.env.AUTH_REQUIRED === 'true',
   },
+  // === API machine (/api/v1) ===
+  // Clés des applications tierces, au format « nom:clé », séparées par des
+  // virgules. Le nom sert d'auteur dans le journal : sans lui, les envois
+  // d'une autre application seraient anonymes. Une clé se révoque en la
+  // retirant de la variable, sans toucher au code.
+  apiKeys: parseApiKeys(process.env.API_KEYS),
   // === Application Antennes ===
   // Un lien depuis Antennes ouvre la page Étiquettes avec l'adresse de
   // l'antenne préremplie. Le jeton reste ici : le transmettre dans l'URL du

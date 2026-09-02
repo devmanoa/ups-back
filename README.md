@@ -250,6 +250,29 @@ Aucune dépendance : `node:crypto` suffit.
 > Passez `AUTH_REQUIRED=true` seulement après avoir vérifié que le client
 > Keycloak fonctionne, sinon toute l'application devient inaccessible.
 
+### API machine pour les autres applications (`/api/v1`)
+
+Une autre application pilote cette application-ci comme un service
+d'expédition : elle crée des étiquettes, les récupère et les annule sans
+passer par l'interface. Contrat détaillé dans **[API-V1.md](API-V1.md)**.
+
+Deux traits la distinguent des routes internes :
+
+- **Clé d'API obligatoire**, en en-tête `X-API-Key`. Keycloak identifie des
+  personnes derrière un navigateur ; ici l'appelant est un serveur. Les clés
+  sont déclarées dans `API_KEYS` au format `nom:clé`, et le nom devient
+  l'auteur des actions dans le journal — sans quoi les envois d'une autre
+  application y seraient anonymes.
+- **Préfixe versionné**, pour que l'interface évolue sans casser une
+  application qu'on ne redéploie pas au même rythme.
+
+Sans `API_KEYS`, `/api/v1` refuse tout appel (`503`) : une API ouverte par
+défaut laisserait n'importe qui générer des étiquettes facturées.
+
+La comparaison des clés est à durée constante (`timingSafeEqual`) : un `===`
+sort au premier caractère différent et laisserait retrouver la clé caractère
+par caractère en mesurant le temps de réponse.
+
 ### Commandes (lots d'envoi groupé)
 
 Chaque appel à `/api/shipping/bulk` produit un `batch_id`. Les routes

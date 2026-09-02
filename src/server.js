@@ -17,6 +17,7 @@ import { activityRouter } from './routes/activity.js';
 import { batchesRouter } from './routes/batches.js';
 import { packageTypesRouter } from './routes/packageTypes.js';
 import { antennesRouter } from './routes/antennes.js';
+import { publicApiRouter } from './routes/publicApi.js';
 import { attachActor } from './middleware/auth.js';
 import { jwksStatus } from './services/keycloak.js';
 import { migrate } from './db/migrate.js';
@@ -73,6 +74,11 @@ app.use('/api/batches', batchesRouter);
 app.use('/api/package-types', packageTypesRouter);
 app.use('/api/antennes', antennesRouter);
 
+// API machine, destinee aux autres applications. Prefixe versionne : son
+// contrat doit survivre aux evolutions de l'interface, redeployee a un autre
+// rythme. La cle d'API est exigee par le routeur lui-meme.
+app.use('/api/v1', publicApiRouter);
+
 app.use(notFound);
 app.use(errorHandler);
 
@@ -107,6 +113,14 @@ app.listen(config.port, '0.0.0.0', () => {
       `  → Keycloak : realm ${config.auth.realm}` +
         (config.auth.required ? ' (jeton obligatoire)' : ' (jeton vérifié si fourni)'),
     );
+  }
+
+  if (config.apiKeys.length) {
+    console.log(
+      `  → API machine /api/v1 : ${config.apiKeys.map((k) => k.name).join(', ')}`,
+    );
+  } else {
+    console.warn(`  ⚠  API_KEYS absent — /api/v1 refuse tout appel (503)`);
   }
 
   console.log(`  → CORS autorisé pour : ${config.corsOrigin.join(', ')}`);
