@@ -254,7 +254,8 @@ Aucune dépendance : `node:crypto` suffit.
 
 Une autre application pilote cette application-ci comme un service
 d'expédition : elle crée des étiquettes, les récupère et les annule sans
-passer par l'interface. Contrat détaillé dans **[API-V1.md](API-V1.md)**.
+passer par l'interface. Contrat détaillé dans **[API-V1.md](API-V1.md)**,
+client Node.js et exemple React dans **[examples/](examples/)**.
 
 Deux traits la distinguent des routes internes :
 

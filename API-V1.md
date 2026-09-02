@@ -267,6 +267,38 @@ Toutes les erreurs suivent la même forme :
 
 ---
 
+## Exemples prêts à l'emploi
+
+| Fichier | Usage |
+|---|---|
+| [`examples/ups-client.js`](examples/ups-client.js) | Client Node.js, sans dépendance — à copier dans votre application |
+| [`examples/usage.js`](examples/usage.js) | Les cinq flux, exécutables tels quels |
+| [`examples/react/server-proxy.js`](examples/react/server-proxy.js) | Proxy Express : le serveur détient la clé, pas le navigateur |
+| [`examples/react/CreateLabel.tsx`](examples/react/CreateLabel.tsx) | Composant React (react-query) avec impression |
+
+Lancer les exemples Node :
+
+```bash
+UPS_API_URL=https://<backend> UPS_API_KEY=<votre-cle> node examples/usage.js
+```
+
+### En React : passer par votre propre backend
+
+Le navigateur ne doit **jamais** appeler `/api/v1` directement. Une clé
+placée dans du code React — ou dans une variable `VITE_*` — se retrouve dans
+le bundle et dans l'onglet Réseau : n'importe quel visiteur pourrait créer
+des étiquettes facturées sur votre compte.
+
+```
+Navigateur  →  votre backend (détient la clé)  →  /api/v1
+```
+
+C'est le même raisonnement que pour `ANTENNES_WS_TOKEN`, gardé côté serveur.
+Votre proxy doit par ailleurs authentifier ses propres utilisateurs, sans
+quoi il devient une API UPS ouverte à tout Internet.
+
+---
+
 ## Exemple complet
 
 ```bash
