@@ -65,6 +65,11 @@ export const config = {
     keycloakUrl: (process.env.KEYCLOAK_URL || '').trim().replace(/\/$/, ''),
     realm: (process.env.KEYCLOAK_REALM || 'konitys').trim(),
     required: process.env.AUTH_REQUIRED === 'true',
+    // Compte de service pour l'annuaire (mentions @). Distinct du client
+    // navigateur : il porte le rôle `view-users` et son secret ne doit
+    // jamais atteindre le front, qui pourrait alors lister tout le realm.
+    adminClientId: (process.env.KEYCLOAK_ADMIN_CLIENT_ID || '').trim(),
+    adminClientSecret: (process.env.KEYCLOAK_ADMIN_CLIENT_SECRET || '').trim(),
   },
   // === API machine (/api/v1) ===
   // Clés des applications tierces, au format « nom:clé », séparées par des
@@ -80,6 +85,17 @@ export const config = {
     apiUrl: (process.env.ANTENNES_API_URL || '').trim().replace(/\/$/, ''),
     token: (process.env.ANTENNES_WS_TOKEN || '').trim(),
   },
+  // === Notifications ===
+  // Application tierce prévenue lorsqu'un collègue est mentionné dans un
+  // commentaire. Le jeton reste ici : côté navigateur, il permettrait
+  // d'envoyer des notifications à n'importe qui.
+  notifications: {
+    apiUrl: (process.env.NOTIFICATIONS_API_URL || '').trim().replace(/\/$/, ''),
+    token: (process.env.NOTIFICATIONS_TOKEN || '').trim(),
+  },
+  // Adresse publique de cette application, pour que la notification pointe
+  // vers l'envoi concerné plutôt que d'obliger à le retrouver à la main.
+  appUrl: (process.env.APP_URL || '').trim().replace(/\/$/, ''),
   corsOrigin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
     .split(',')
     .map((o) => o.trim())

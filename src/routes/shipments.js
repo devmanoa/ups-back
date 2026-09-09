@@ -19,6 +19,15 @@ import {
   MAX_BODY,
 } from '../db/commentsRepository.js';
 import { findCreator, findCreators, listActivity } from '../db/activityRepository.js';
+import {
+  addMentions,
+  listByComments,
+  markNotified,
+  markNotifyError,
+} from '../db/mentionsRepository.js';
+import { resolveMentions } from '../services/mentions.js';
+import { sanitizeComment } from '../services/sanitizeComment.js';
+import { notifyMention, excerptOf } from '../services/notifications.js';
 import { withAnomalies, summarize } from '../services/anomalies.js';
 import { config } from '../config.js';
 import { isDbEnabled } from '../db/pool.js';
@@ -401,10 +410,60 @@ shipmentsRouter.get(
   '/:trackingNumber/comments',
   asyncHandler(async (req, res) => {
     requireDb();
-    const comments = await listComments(await commentKey(req.params.trackingNumber));
+    const comments = await withMentions(
+      await listComments(await commentKey(req.params.trackingNumber)),
+    );
     res.json({ success: true, data: { comments, count: comments.length } });
   }),
 );
+
+/**
+ * Rattache à chaque commentaire les personnes qu'il mentionne.
+ *
+ * En une requête pour tout le fil : une par commentaire multiplierait les
+ * allers-retours sur une page qui en affiche déjà plusieurs.
+ */
+async function withMentions(comments) {
+  if (!comments.length) return comments;
+
+  const byComment = await listByComments(comments.map((c) => c.id)).catch(() => ({}));
+
+  return comments.map((comment) => ({
+    ...comment,
+    mentions: (byComment[comment.id] ?? []).map((m) => m.user),
+  }));
+}
+
+/**
+ * Envoie les notifications de mention en arrière-plan.
+ *
+ * Volontairement non attendu par la route : le commentaire est déjà
+ * enregistré, et une panne du service de notifications ne doit ni retarder
+ * la réponse ni faire échouer l'écriture. Chaque échec est noté en base,
+ * d'où la reprise possible.
+ */
+function dispatchMentions({ mentions, author, body, trackingNumber }) {
+  const excerpt = excerptOf(body);
+  const appUrl = config.appUrl
+    ? `${config.appUrl}/shipments/${encodeURIComponent(trackingNumber)}`
+    : null;
+
+  for (const mention of mentions) {
+    notifyMention({ mention, author, excerpt, appUrl })
+      .then((result) => {
+        // Service non configuré : ni succès ni échec à enregistrer, la
+        // mention reste en attente et partira à la reprise.
+        if (result.sent) return markNotified(mention.id);
+      })
+      .catch((err) => {
+        console.warn(`[mentions] Notification ${mention.id} échouée : ${err.message}`);
+        return markNotifyError(mention.id, err.message);
+      })
+      .catch(() => {
+        // La base elle-même est indisponible : rien de plus à tenter ici.
+      });
+  }
+}
 
 /** POST /api/shipments/:trackingNumber/comments — ajoute un commentaire */
 shipmentsRouter.post(
@@ -425,13 +484,43 @@ shipmentsRouter.post(
       throw badRequest(`Le commentaire dépasse ${MAX_BODY} caractères.`);
     }
 
-    const comment = await addComment({
-      trackingNumber: await commentKey(req.params.trackingNumber),
-      body,
-      actor: req.actor,
-    });
+    const key = await commentKey(req.params.trackingNumber);
 
-    res.status(201).json({ success: true, data: comment });
+    // Nettoyé avant stockage, en plus du nettoyage à l'affichage : une
+    // requête forgée directement sur l'API contournerait le front.
+    const safeBody = sanitizeComment(body);
+
+    const comment = await addComment({ trackingNumber: key, body: safeBody, actor: req.actor });
+
+    // Mentions résolues côté serveur : la liste des personnes citées est
+    // relue depuis le HTML et vérifiée auprès de Keycloak, jamais reçue du
+    // client, qui pourrait sinon notifier n'importe qui.
+    let mentions = [];
+    try {
+      const users = await resolveMentions(safeBody, { authorId: req.actor?.id });
+      mentions = await addMentions({ commentId: comment.id, trackingNumber: key, users });
+    } catch (err) {
+      // L'annuaire indisponible ne doit pas perdre le commentaire, déjà
+      // enregistré : la mention est simplement non résolue.
+      console.warn(`[mentions] Résolution impossible : ${err.message}`);
+    }
+
+    // Notifications envoyées sans attendre : le service peut être lent ou en
+    // panne, et l'utilisateur n'a pas à patienter pour un commentaire déjà
+    // enregistré. Les échecs restent rattrapables via /mentions/retry.
+    if (mentions.length) {
+      dispatchMentions({
+        mentions,
+        author: req.actor,
+        body: safeBody,
+        trackingNumber: req.params.trackingNumber,
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      data: { ...comment, mentions: mentions.map((m) => m.user) },
+    });
   }),
 );
 
@@ -497,7 +586,9 @@ shipmentsRouter.get(
       listActivity({ entityType: 'shipment', entityId: journalIds, limit: 100 })
         .then((r) => r.entries)
         .catch(() => []),
-      listComments(shipment.localShipmentId).catch(() => []),
+      listComments(shipment.localShipmentId)
+        .then(withMentions)
+        .catch(() => []),
       // Les colis frères de la même expédition : sans eux, un envoi de trois
       // colis n'en montrerait qu'un.
       listPackagesOfShipment(shipment.localShipmentId).catch(() => [shipment]),

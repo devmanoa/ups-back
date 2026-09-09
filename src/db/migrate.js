@@ -243,6 +243,42 @@ CREATE TABLE IF NOT EXISTS shipment_comments (
 
 CREATE INDEX IF NOT EXISTS shipment_comments_tracking_idx
   ON shipment_comments (tracking_number, created_at DESC);
+
+-- Personnes mentionnées dans un commentaire.
+--
+-- Table séparée plutôt qu'un tableau dans shipment_comments : une mention se
+-- retrouve par personne (« mes mentions ») et porte son propre état d'envoi
+-- de notification, qu'une colonne JSON rendrait pénible à interroger.
+CREATE TABLE IF NOT EXISTS comment_mentions (
+  id            BIGSERIAL PRIMARY KEY,
+  comment_id    BIGINT NOT NULL REFERENCES shipment_comments(id) ON DELETE CASCADE,
+  -- Numéro recopié : la notification cite l'envoi, et le lire ici évite une
+  -- jointure sur chaque envoi de notification.
+  tracking_number TEXT NOT NULL,
+  -- Identité recopiée comme ailleurs : un compte supprimé dans Keycloak ne
+  -- doit pas effacer la mention du fil.
+  user_id       TEXT NOT NULL,
+  user_name     TEXT,
+  user_email    TEXT,
+  -- Suivi de la notification : NULL tant qu'elle n'est pas partie. Permet de
+  -- réessayer après une panne de l'application de notifications sans risquer
+  -- de notifier deux fois.
+  notified_at   TIMESTAMPTZ,
+  notify_error  TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Une même personne n'est mentionnée qu'une fois par commentaire, même si
+-- son nom y figure deux fois : sinon elle recevrait deux notifications.
+CREATE UNIQUE INDEX IF NOT EXISTS comment_mentions_unique_idx
+  ON comment_mentions (comment_id, user_id);
+
+CREATE INDEX IF NOT EXISTS comment_mentions_user_idx
+  ON comment_mentions (user_id, created_at DESC);
+
+-- Sert la reprise des notifications en échec.
+CREATE INDEX IF NOT EXISTS comment_mentions_pending_idx
+  ON comment_mentions (created_at) WHERE notified_at IS NULL;
 `;
 
 export async function migrate() {
@@ -254,7 +290,7 @@ export async function migrate() {
   try {
     await query(SCHEMA);
     console.log(
-      '  → Base PostgreSQL prête (shipments, addresses, activity_log, package_types, shipment_comments)',
+      '  → Base PostgreSQL prête (shipments, addresses, activity_log, package_types, shipment_comments, comment_mentions)',
     );
     return true;
   } catch (err) {

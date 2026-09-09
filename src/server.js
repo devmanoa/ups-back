@@ -14,12 +14,14 @@ import { paperlessRouter } from './routes/paperless.js';
 import { shipmentsRouter } from './routes/shipments.js';
 import { addressesRouter } from './routes/addresses.js';
 import { activityRouter } from './routes/activity.js';
+import { usersRouter } from './routes/users.js';
 import { batchesRouter } from './routes/batches.js';
 import { packageTypesRouter } from './routes/packageTypes.js';
 import { antennesRouter } from './routes/antennes.js';
 import { publicApiRouter } from './routes/publicApi.js';
 import { attachActor } from './middleware/auth.js';
 import { jwksStatus } from './services/keycloak.js';
+import { directoryStatus } from './services/directory.js';
 import { migrate } from './db/migrate.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { asyncHandler } from './middleware/validate.js';
@@ -41,6 +43,8 @@ app.get('/health', (req, res) => {
     apiVersions: API_VERSIONS,
     token: tokenStatus(),
     auth: jwksStatus(),
+    // Annuaire des mentions : distinct de auth, il a son propre client.
+    directory: directoryStatus(),
   });
 });
 
@@ -70,6 +74,7 @@ app.use('/api/paperless', paperlessRouter);
 app.use('/api/shipments', shipmentsRouter);
 app.use('/api/addresses', addressesRouter);
 app.use('/api/activity', activityRouter);
+app.use('/api/users', usersRouter);
 app.use('/api/batches', batchesRouter);
 app.use('/api/package-types', packageTypesRouter);
 app.use('/api/antennes', antennesRouter);
