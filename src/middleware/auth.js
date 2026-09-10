@@ -52,9 +52,19 @@ export async function attachActor(req, res, next) {
 
 /**
  * Exige une identité sur une route donnée, quelle que soit AUTH_REQUIRED.
- * Inutilisé pour l'instant : prévu pour les routes d'administration.
+ *
+ * Sert l'annuaire des mentions : il expose les noms et courriels du realm,
+ * qui n'ont pas à être lisibles par quiconque atteint le backend. Le mode
+ * permissif d'AUTH_REQUIRED vaut pour les pages d'expédition, pas pour des
+ * données personnelles.
+ *
+ * Keycloak non configuré : la route reste ouverte, faute de quoi elle serait
+ * inutilisable en développement. C'est sans conséquence, l'annuaire ayant
+ * lui aussi besoin de Keycloak pour répondre.
  */
 export function requireActor(req, res, next) {
+  if (!isAuthConfigured()) return next();
+
   if (!req.actor) {
     return next(
       Object.assign(new Error('Authentification requise.'), {

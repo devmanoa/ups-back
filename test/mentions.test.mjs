@@ -20,11 +20,29 @@ const ANNUAIRE = {
 
 const state = { actor: null, mentions: [], notified: [], notifyFails: false, nextId: 1 };
 
+// Keycloak actif : sans cela requireActor laisserait tout passer, et le
+// test de l'appel anonyme ne prouverait rien.
+mock.module(src('services/keycloak.js'), {
+  namedExports: {
+    isAuthConfigured: () => true,
+    verifyToken: async () => ({}),
+    toActor: () => null,
+    jwksStatus: () => ({ configured: true }),
+    resetJwksCache: () => {},
+  },
+});
+
 mock.module(src('services/directory.js'), {
   namedExports: {
     isDirectoryConfigured: () => true,
+    // Reproduit la regle du vrai service : une recherche vide ne renvoie
+    // personne, l'annuaire comptant plusieurs dizaines de personnes.
     searchUsers: async (term) =>
-      Object.values(ANNUAIRE).filter((u) => u.name.toLowerCase().includes(term.toLowerCase())),
+      term.trim()
+        ? Object.values(ANNUAIRE).filter((u) =>
+            u.name.toLowerCase().includes(term.toLowerCase()),
+          )
+        : [],
     findUsersByIds: async (ids) => ids.map((id) => ANNUAIRE[id]).filter(Boolean),
     directoryStatus: () => ({ configured: true }),
   },
@@ -258,4 +276,29 @@ test('l annuaire repond a la recherche', async (t) => {
   assert.equal(status, 200);
   assert.equal(body.data.configured, true);
   assert.deepEqual(body.data.users.map((u) => u.id), ['uid-julie']);
+});
+
+test('l annuaire refuse un appel anonyme', async (t) => {
+  reset();
+  state.actor = null;
+  const call = await startServer(t);
+
+  const { status, body } = await call('GET', '/api/users?search=julie');
+
+  // L'annuaire expose noms et courriels de tout le realm : il ne doit pas
+  // etre lisible par quiconque atteint le backend, meme quand
+  // AUTH_REQUIRED laisse les pages d'expedition ouvertes.
+  assert.equal(status, 401);
+  assert.equal(body.error.code, 'AUTH_REQUIRED');
+});
+
+test('une recherche vide ne renvoie personne', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const { body } = await call('GET', '/api/users?search=');
+
+  // Sur plusieurs dizaines de personnes, les vingt premieres n'aident pas a
+  // trouver quelqu'un et distribueraient une part de l'annuaire.
+  assert.deepEqual(body.data.users, []);
 });

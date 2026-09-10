@@ -102,11 +102,14 @@ function toUser(user) {
 /**
  * Cherche des utilisateurs par nom, prénom, identifiant ou courriel.
  *
- * Un terme vide renvoie les premiers utilisateurs du realm : c'est ce qui
- * s'affiche à l'ouverture du menu de mention, avant toute frappe.
+ * Un terme vide ne renvoie rien. Sur un realm de plusieurs dizaines de
+ * personnes, les vingt premières par ordre interne n'aident pas à trouver
+ * quelqu'un, et distribuer une part de l'annuaire à chaque « @ » tapé par
+ * mégarde n'a pas lieu d'être. Une lettre suffit à lancer la recherche.
  */
 export async function searchUsers(term = '', { limit = MAX_RESULTS } = {}) {
   if (!isDirectoryConfigured()) return [];
+  if (!term.trim()) return [];
 
   const key = `${term.trim().toLowerCase()}|${limit}`;
   const cached = searchCache.get(key);

@@ -3,9 +3,16 @@ import { searchUsers, isDirectoryConfigured } from '../services/directory.js';
 import { listPendingNotifications, markNotified, markNotifyError } from '../db/mentionsRepository.js';
 import { notifyMention, isNotificationsConfigured } from '../services/notifications.js';
 import { asyncHandler } from '../middleware/validate.js';
+import { requireActor } from '../middleware/auth.js';
 import { isDbEnabled } from '../db/pool.js';
 
 export const usersRouter = Router();
+
+// L'annuaire expose les noms et courriels de tout le realm — plus de
+// soixante personnes, dont certaines étrangères à cette application. Une
+// identité est exigée ici même quand AUTH_REQUIRED laisse le reste ouvert :
+// sans cela, quiconque atteint le backend pourrait le parcourir.
+usersRouter.use(requireActor);
 
 /**
  * GET /api/users?search=jul — annuaire pour les mentions.
