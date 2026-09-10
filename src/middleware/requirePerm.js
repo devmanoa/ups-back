@@ -153,9 +153,13 @@ export function requirePerm(permKey, { page = false } = {}) {
     // qu'aux journaux, et l'exposer renseignerait sur la structure interne.
     console.warn(`[perms] Refus de « ${permKey} » pour ${me?.user_id ?? 'anonyme'}`);
 
+    // `originalUrl` et non `path` : ce dernier est relatif au routeur et vaut
+    // « /1Z123 » sur /api/shipping/1Z123, si bien qu'un appel d'API recevrait
+    // la page HTML au lieu du JSON attendu.
     const wantsJson =
       !page &&
-      (req.path.startsWith('/api/') || (req.headers.accept || '').includes('application/json'));
+      ((req.originalUrl || '').startsWith('/api/') ||
+        (req.headers.accept || '').includes('application/json'));
 
     if (wantsJson) {
       return res.status(403).json({

@@ -6,6 +6,7 @@
  * passer alors que le contrôle est censé être actif.
  */
 import { test } from 'node:test';
+import { createServer } from 'node:http';
 import assert from 'node:assert/strict';
 import { canFor } from '../src/middleware/requirePerm.js';
 import { permissionsSchema } from '../src/routes/permissionsSchema.js';
@@ -98,4 +99,56 @@ test('chaque cle suit la convention entite.action', () => {
   for (const key of keys) {
     assert.match(key, /^[a-z0-9_]+(\.[a-z0-9_]+)+$/, `cle non conforme : ${key}`);
   }
+});
+
+test('un appel d API refuse recoit du JSON, pas la page HTML', async (t) => {
+  const { requirePerm } = await import('../src/middleware/requirePerm.js');
+  const { config } = await import('../src/config.js');
+
+  // Passerelle simulee : elle refuse tout.
+  const gateway = await new Promise((resolve) => {
+    const s = createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        data: {
+          user_id: '20',
+          apps: { ups: {} },
+          is_admin: false,
+          enforcement: { globally_enabled: true, disabled_apps: [] },
+        },
+      }));
+    }).listen(0, () => resolve(s));
+  });
+  t.after(() => gateway.close());
+
+  const precedent = config.permissions;
+  config.permissions = {
+    gatewayUrl: `http://127.0.0.1:${gateway.address().port}`,
+    appKey: 'ups',
+    plateformUrl: '',
+  };
+  t.after(() => { config.permissions = precedent; });
+
+  const capture = { status: null, json: null, html: null };
+  const res = {
+    status(code) { capture.status = code; return this; },
+    json(body) { capture.json = body; return this; },
+    type() { return this; },
+    send(body) { capture.html = body; return this; },
+  };
+
+  // `req.path` vaut « /1Z1 » sous un routeur monte sur /api/shipping :
+  // s'y fier servait la page HTML a un appel d'API.
+  await requirePerm('shipments.void')(
+    { headers: { authorization: 'Bearer jeton' }, path: '/1Z1', originalUrl: '/api/shipping/1Z1' },
+    res,
+    () => { throw new Error('la garde aurait du refuser'); },
+  );
+
+  assert.equal(capture.status, 403);
+  assert.ok(capture.json, 'un appel d API doit recevoir du JSON');
+  assert.equal(capture.html, null, 'jamais la page HTML sur /api/');
+  assert.equal(capture.json.error.code, 'FORBIDDEN');
+  // La cle technique ne doit jamais atteindre l'utilisateur.
+  assert.doesNotMatch(JSON.stringify(capture.json), /shipments\.void/);
 });
