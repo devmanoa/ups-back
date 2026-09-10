@@ -34,6 +34,7 @@ import { isDbEnabled } from '../db/pool.js';
 import { trackByNumber, findMatchingPackage } from '../services/tracking.js';
 import { getEvents, latestStatusByTracking } from '../services/quantumView.js';
 import { asyncHandler, badRequest } from '../middleware/validate.js';
+import { requirePerm, hasPerm } from '../middleware/requirePerm.js';
 
 export const shipmentsRouter = Router();
 
@@ -210,6 +211,7 @@ shipmentsRouter.get(
  */
 shipmentsRouter.post(
   '/refresh-status',
+  requirePerm('shipments.refresh'),
   asyncHandler(async (req, res) => {
     const { trackingNumbers } = req.body;
 
@@ -262,6 +264,7 @@ const TRACKING_FALLBACK_LIMIT = 50;
  */
 shipmentsRouter.post(
   '/sync',
+  requirePerm('shipments.refresh'),
   asyncHandler(async (req, res) => {
     const { subscriptionName, maxPages = 5 } = req.body || {};
 
@@ -468,6 +471,7 @@ function dispatchMentions({ mentions, author, body, trackingNumber }) {
 /** POST /api/shipments/:trackingNumber/comments — ajoute un commentaire */
 shipmentsRouter.post(
   '/:trackingNumber/comments',
+  requirePerm('comments.create'),
   asyncHandler(async (req, res) => {
     requireDb();
 
@@ -527,13 +531,19 @@ shipmentsRouter.post(
 /** DELETE /api/shipments/:trackingNumber/comments/:id — retire son commentaire */
 shipmentsRouter.delete(
   '/:trackingNumber/comments/:id',
+  // Chacun peut retirer son propre commentaire ; supprimer celui d'un autre
+  // demande comments.delete_any, verifie dans le gestionnaire.
+  requirePerm('comments.delete_own'),
   asyncHandler(async (req, res) => {
     requireDb();
 
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id < 1) throw badRequest('Identifiant de commentaire invalide.');
 
-    const outcome = await deleteComment(id, req.actor?.id ?? null);
+    // La modération lève la règle « seul l'auteur supprime » : le dépôt
+    // reçoit alors l'auteur du commentaire lui-même, ce qui l'autorise.
+    const moderator = await hasPerm(req, 'comments.delete_any');
+    const outcome = await deleteComment(id, req.actor?.id ?? null, { force: moderator });
 
     if (outcome === 'not_found') {
       throw Object.assign(new Error('Commentaire introuvable.'), {

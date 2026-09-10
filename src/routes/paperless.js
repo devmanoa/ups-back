@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePerm } from '../middleware/requirePerm.js';
 import {
   uploadDocument,
   linkDocumentToShipment,
@@ -26,6 +27,7 @@ paperlessRouter.get('/document-types', (req, res) => {
 /** POST /api/paperless/upload — téléverse un document douanier */
 paperlessRouter.post(
   '/upload',
+  requirePerm('paperless.upload'),
   asyncHandler(async (req, res) => {
     const { fileName, fileFormat, documentType, fileBase64 } = req.body;
 
@@ -51,6 +53,7 @@ paperlessRouter.post(
 /** POST /api/paperless/link — rattache un document à une expédition */
 paperlessRouter.post(
   '/link',
+  requirePerm('paperless.link'),
   asyncHandler(async (req, res) => {
     const { documentIds, shipmentIdentifier, trackingNumber, shipFromCountry, shipToCountry } =
       req.body;

@@ -61,16 +61,18 @@ export async function addComment({ trackingNumber, body, actor }) {
  * Distinguer les deux derniers cas permet un message utile plutôt qu'un 404
  * trompeur sur un commentaire qui existe bel et bien.
  */
-export async function deleteComment(id, actorId) {
+export async function deleteComment(id, actorId, { force = false } = {}) {
   const { rows } = await query(
     `SELECT actor_id FROM shipment_comments WHERE id = $1 AND deleted_at IS NULL`,
     [id],
   );
   if (!rows.length) return 'not_found';
 
+  // `force` : modération, accordée par le droit comments.delete_any. Elle
+  // lève la règle ci-dessous, sans la contourner ailleurs.
   // Sans identité vérifiée (Keycloak absent), personne ne peut supprimer :
   // un fil partagé ne doit pas être effaçable par un anonyme.
-  if (!actorId || rows[0].actor_id !== actorId) return 'forbidden';
+  if (!force && (!actorId || rows[0].actor_id !== actorId)) return 'forbidden';
 
   await query(`UPDATE shipment_comments SET deleted_at = NOW() WHERE id = $1`, [id]);
   return 'deleted';

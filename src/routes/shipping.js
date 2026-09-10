@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePerm } from '../middleware/requirePerm.js';
 import { config } from '../config.js';
 import { createShipment, voidShipment, LABEL_FORMATS } from '../services/shipping.js';
 import { SERVICE_CODES } from '../services/rating.js';
@@ -79,6 +80,7 @@ shippingRouter.get(
 /** POST /api/shipping — crée une expédition et son étiquette */
 shippingRouter.post(
   '/',
+  requirePerm('shipments.create'),
   asyncHandler(async (req, res) => {
     const {
       shipTo,
@@ -210,6 +212,7 @@ async function estimateDelivery({ shipTo, serviceCode, shipment }) {
  */
 shippingRouter.post(
   '/bulk',
+  requirePerm('shipments.create_bulk'),
   asyncHandler(async (req, res) => {
     // `shipFrom` vaut pour tout le lot : un envoi groupé part d'un seul
     // endroit, et le répéter sur chaque ligne du CSV serait du bruit.
@@ -362,6 +365,7 @@ async function resolvePackageTypes(shipments) {
 /** DELETE /api/shipping/:shipmentId — annule une expédition */
 shippingRouter.delete(
   '/:shipmentId',
+  requirePerm('shipments.void'),
   asyncHandler(async (req, res) => {
     const trackingNumbers = req.query.trackingNumbers
       ? String(req.query.trackingNumbers).split(',').map((t) => t.trim()).filter(Boolean)

@@ -15,6 +15,7 @@ import { shipmentsRouter } from './routes/shipments.js';
 import { addressesRouter } from './routes/addresses.js';
 import { activityRouter } from './routes/activity.js';
 import { usersRouter } from './routes/users.js';
+import { permissionsSchemaRouter } from './routes/permissionsSchema.js';
 import { batchesRouter } from './routes/batches.js';
 import { packageTypesRouter } from './routes/packageTypes.js';
 import { antennesRouter } from './routes/antennes.js';
@@ -47,6 +48,10 @@ app.get('/health', (req, res) => {
     directory: directoryStatus(),
   });
 });
+
+// Catalogue des droits, lu par la passerelle du Hub sans jeton : il doit
+// rester public, comme /health, et donc precede attachActor.
+app.use('/adminpanel/permissions-schema', permissionsSchemaRouter);
 
 // Identifie l'appelant à partir du jeton Keycloak, pour nommer les auteurs
 // dans le journal d'activité. Placé après /health, qui doit rester joignable

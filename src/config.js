@@ -85,6 +85,15 @@ export const config = {
     apiUrl: (process.env.ANTENNES_API_URL || '').trim().replace(/\/$/, ''),
     token: (process.env.ANTENNES_WS_TOKEN || '').trim(),
   },
+  // === Permissions Konitys ===
+  // Passerelle du Hub, qui dit ce que chaque utilisateur a le droit de faire.
+  // `appKey` est la clé canonique déclarée par notre schéma : la changer
+  // rendrait orphelins les droits déjà accordés côté Hub.
+  permissions: {
+    gatewayUrl: (process.env.GATEWAY_URL || '').trim().replace(/\/$/, ''),
+    appKey: (process.env.APP_KEY || 'ups').trim(),
+    plateformUrl: (process.env.PLATEFORM_URL || '').trim().replace(/\/$/, ''),
+  },
   // === Notifications ===
   // Application tierce prévenue lorsqu'un collègue est mentionné dans un
   // commentaire. Le jeton reste ici : côté navigateur, il permettrait

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePerm } from '../middleware/requirePerm.js';
 import {
   listPackageTypes,
   getPackageType,
@@ -55,6 +56,7 @@ packageTypesRouter.get(
 /** POST /api/package-types — enregistre un type */
 packageTypesRouter.post(
   '/',
+  requirePerm('package_types.create'),
   asyncHandler(async (req, res) => {
     const input = validateInput(req.body, { partial: false });
 
@@ -89,6 +91,7 @@ packageTypesRouter.get(
 /** PUT /api/package-types/:id — modification partielle */
 packageTypesRouter.put(
   '/:id',
+  requirePerm('package_types.edit'),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id);
     const input = validateInput(req.body, { partial: true });
@@ -115,6 +118,7 @@ packageTypesRouter.put(
 /** DELETE /api/package-types/:id — archive, ?hard=true pour supprimer */
 packageTypesRouter.delete(
   '/:id',
+  requirePerm('package_types.delete'),
   asyncHandler(async (req, res) => {
     const hard = req.query.hard === 'true';
     const type = await archivePackageType(parseId(req.params.id), { hard });
@@ -138,6 +142,7 @@ packageTypesRouter.delete(
 /** POST /api/package-types/:id/restore */
 packageTypesRouter.post(
   '/:id/restore',
+  requirePerm('package_types.delete'),
   asyncHandler(async (req, res) => {
     try {
       const type = await restorePackageType(parseId(req.params.id));
@@ -166,6 +171,9 @@ packageTypesRouter.post(
 /** POST /api/package-types/:id/use — enregistre une utilisation */
 packageTypesRouter.post(
   '/:id/use',
+  // Simple compteur d'usage : il accompagne la selection d'une entree et
+  // suit donc le droit de lecture, pas celui de modification.
+  requirePerm('package_types.view'),
   asyncHandler(async (req, res) => {
     const type = await markUsed(parseId(req.params.id));
     if (!type) throw notFoundError('Type de colis introuvable.');

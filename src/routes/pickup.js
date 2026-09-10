@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePerm } from '../middleware/requirePerm.js';
 import { createPickup, cancelPickup, CONTAINER_CODES, MAX_TRACKING_NUMBERS } from '../services/pickup.js';
 import { asyncHandler, badRequest, requireFields } from '../middleware/validate.js';
 import { log, ACTIONS } from '../services/activity.js';
@@ -16,6 +17,7 @@ pickupRouter.get('/containers', (req, res) => {
 /** POST /api/pickup — planifie un enlèvement */
 pickupRouter.post(
   '/',
+  requirePerm('pickup.create'),
   asyncHandler(async (req, res) => {
     const {
       address,
@@ -113,6 +115,7 @@ pickupRouter.post(
 /** DELETE /api/pickup/:prn — annule un enlèvement */
 pickupRouter.delete(
   '/:prn',
+  requirePerm('pickup.cancel'),
   asyncHandler(async (req, res) => {
     const result = await cancelPickup(req.params.prn);
 

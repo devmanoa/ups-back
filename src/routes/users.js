@@ -4,6 +4,7 @@ import { listPendingNotifications, markNotified, markNotifyError } from '../db/m
 import { notifyMention, isNotificationsConfigured } from '../services/notifications.js';
 import { asyncHandler } from '../middleware/validate.js';
 import { requireActor } from '../middleware/auth.js';
+import { requirePerm } from '../middleware/requirePerm.js';
 import { isDbEnabled } from '../db/pool.js';
 
 export const usersRouter = Router();
@@ -13,6 +14,10 @@ export const usersRouter = Router();
 // identité est exigée ici même quand AUTH_REQUIRED laisse le reste ouvert :
 // sans cela, quiconque atteint le backend pourrait le parcourir.
 usersRouter.use(requireActor);
+
+// L'annuaire donne acces aux noms et courriels du realm : un droit dedie
+// permet de le reserver a qui en a l'usage.
+usersRouter.use(requirePerm('directory.search'));
 
 /**
  * GET /api/users?search=jul — annuaire pour les mentions.

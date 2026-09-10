@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requirePerm } from '../middleware/requirePerm.js';
 import {
   listAddresses,
   getAddress,
@@ -59,6 +60,7 @@ addressesRouter.get(
 /** POST /api/addresses/groups — crée un groupe */
 addressesRouter.post(
   '/groups',
+  requirePerm('addresses.groups.manage'),
   asyncHandler(async (req, res) => {
     requireFields(req.body, ['name'], 'groupe');
     const name = String(req.body.name).trim();
@@ -87,6 +89,7 @@ addressesRouter.post(
 /** PUT /api/addresses/groups/:id — renomme ou réordonne */
 addressesRouter.put(
   '/groups/:id',
+  requirePerm('addresses.groups.manage'),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id, 'groupe');
     const patch = {};
@@ -125,6 +128,7 @@ addressesRouter.put(
  */
 addressesRouter.delete(
   '/groups/:id',
+  requirePerm('addresses.groups.manage'),
   asyncHandler(async (req, res) => {
     const group = await deleteGroup(parseId(req.params.id, 'groupe'));
     if (!group) throw notFoundError('Groupe introuvable.');
@@ -163,6 +167,7 @@ addressesRouter.get(
 /** POST /api/addresses — enregistre une adresse */
 addressesRouter.post(
   '/',
+  requirePerm('addresses.create'),
   asyncHandler(async (req, res) => {
     const input = await validateAddressInput(req.body, { partial: false });
     try {
@@ -196,6 +201,7 @@ addressesRouter.get(
 /** PUT /api/addresses/:id — modification partielle */
 addressesRouter.put(
   '/:id',
+  requirePerm('addresses.edit'),
   asyncHandler(async (req, res) => {
     const id = parseId(req.params.id, 'adresse');
     const input = await validateAddressInput(req.body, { partial: true });
@@ -223,6 +229,7 @@ addressesRouter.put(
 /** DELETE /api/addresses/:id — archive par défaut, ?hard=true pour supprimer */
 addressesRouter.delete(
   '/:id',
+  requirePerm('addresses.delete'),
   asyncHandler(async (req, res) => {
     const hard = req.query.hard === 'true';
     const address = await archiveAddress(parseId(req.params.id, 'adresse'), { hard });
@@ -246,6 +253,7 @@ addressesRouter.delete(
 /** POST /api/addresses/:id/restore */
 addressesRouter.post(
   '/:id/restore',
+  requirePerm('addresses.delete'),
   asyncHandler(async (req, res) => {
     try {
       const address = await restoreAddress(parseId(req.params.id, 'adresse'));
@@ -277,6 +285,9 @@ addressesRouter.post(
  */
 addressesRouter.post(
   '/:id/use',
+  // Simple compteur d'usage : il accompagne la selection d'une entree et
+  // suit donc le droit de lecture, pas celui de modification.
+  requirePerm('addresses.view'),
   asyncHandler(async (req, res) => {
     const address = await markUsed(parseId(req.params.id, 'adresse'));
     if (!address) throw notFoundError('Adresse introuvable.');

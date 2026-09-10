@@ -350,6 +350,43 @@ curl -X POST http://localhost:3000/api/shipping \
 
 L'étiquette est renvoyée en base64 dans `data.packages[].label.base64`.
 
+## Permissions Konitys
+
+L'application expose son catalogue de droits au gestionnaire de profils du
+Hub, et garde ses routes d'écriture en conséquence.
+
+| | |
+|---|---|
+| Clé d'application | `ups` |
+| Catalogue | `GET /adminpanel/permissions-schema` (public, sans jeton) |
+| Schéma | `src/routes/permissionsSchema.js` |
+| Middleware | `src/middleware/requirePerm.js` |
+| Audit | `node scripts/audit-permissions.mjs` |
+
+Variables d'environnement :
+
+| Variable | Description |
+|---|---|
+| `GATEWAY_URL` | Passerelle du Hub. Vide → les gardes laissent tout passer |
+| `APP_KEY` | Clé canonique (défaut `ups`), doit correspondre au schéma |
+| `PLATEFORM_URL` | Accueil du Hub, pour le bouton de la page de refus |
+
+Quatre règles s'appliquent dans cet ordre : le rôle Keycloak `admin` passe
+outre ; un contrôle désactivé pour l'app laisse tout passer ; le droit accordé
+autorise ; sinon l'action est refusée. Passerelle injoignable, l'accès est
+accordé — règle imposée par la plateforme, un contrôle d'accès qui tombe ne
+devant pas rendre l'application inutilisable.
+
+Sans `GATEWAY_URL`, rien n'est contrôlé : le schéma et les gardes peuvent donc
+être déployés avant que la plateforme ne soit branchée.
+
+**Le contrôle côté navigateur ne protège rien.** Masquer un bouton évite un
+refus après coup ; c'est `requirePerm` qui décide.
+
+Après modification du schéma, incrémenter sa `version` puis cliquer
+« Rafraîchir » dans Admin > Profils & Droits pour que le Hub recharge son cache.
+
+
 ## Format des réponses
 
 Succès :
