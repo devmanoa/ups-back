@@ -23,6 +23,7 @@ const EXEMPTES = {
   'locator.js': 'consultation seule — recherche de points relais',
   'timeInTransit.js': 'consultation seule — estimation de délai',
   'landedCost.js': 'consultation seule — estimation de coût',
+  'adminWs.js': 'description publique du contrat ; le POST refuse toujours (501)',
 };
 
 let manquantes = 0;
