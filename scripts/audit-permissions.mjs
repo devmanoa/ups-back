@@ -23,7 +23,10 @@ const EXEMPTES = {
   'locator.js': 'consultation seule — recherche de points relais',
   'timeInTransit.js': 'consultation seule — estimation de délai',
   'landedCost.js': 'consultation seule — estimation de coût',
-  'adminWs.js': 'description publique du contrat ; le POST refuse toujours (501)',
+  // Joignables uniquement via le proxy de l'admin panel, dont toutes les
+  // routes /api exigent le role Keycloak 'admin' (requireAdmin). Ce role
+  // passe outre les permissions Konitys : un requirePerm n'ajouterait rien.
+  'adminWs.js': 'proxy admin panel : role Keycloak admin exige en amont',
 };
 
 let manquantes = 0;

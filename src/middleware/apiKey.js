@@ -1,5 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { config } from '../config.js';
+import { isDbEnabled } from '../db/pool.js';
+import { findByToken, touchKey } from '../db/apiKeysRepository.js';
 
 /**
  * Authentification des applications tierces par clé d'API.
@@ -28,15 +30,50 @@ function safeEqual(a, b) {
   return timingSafeEqual(bufA, bufB);
 }
 
-/** Application correspondant à une clé, ou null. */
+/** Application correspondant à une clé de la variable d'environnement. */
 export function findApiClient(key) {
   if (!key) return null;
   return config.apiKeys.find((entry) => safeEqual(entry.key, key)) ?? null;
 }
 
-/** Au moins une clé est configurée. */
+/**
+ * Application correspondant à une clé, cherchée dans les deux sources.
+ *
+ * La variable d'environnement d'abord : elle ne dépend pas de la base, et
+ * reste le moyen de rétablir un accès si celle-ci est indisponible. Les clés
+ * créées depuis l'admin vivent en base et survivent au redéploiement.
+ */
+export async function resolveApiClient(key) {
+  const fromEnv = findApiClient(key);
+  if (fromEnv) return { name: fromEnv.name, source: 'env' };
+
+  if (!isDbEnabled()) return null;
+
+  try {
+    const row = await findByToken(key);
+    return row ? { name: row.name, source: 'db', id: row.id } : null;
+  } catch (err) {
+    // Base indisponible : les clés de l'environnement restent acceptées, et
+    // c'est précisément leur raison d'être.
+    console.warn(`[api] Clés en base illisibles : ${err.message}`);
+    return null;
+  }
+}
+
+/** Au moins une clé est configurée dans la variable d'environnement. */
 export function isApiKeyConfigured() {
   return config.apiKeys.length > 0;
+}
+
+/**
+ * L'API peut-elle authentifier quelqu'un ?
+ *
+ * Vrai dès qu'une source est exploitable. La base compte même vide : une clé
+ * peut y être créée depuis l'admin sans redéployer, alors qu'une variable
+ * d'environnement absente exige une intervention.
+ */
+export function isApiUsable() {
+  return isApiKeyConfigured() || isDbEnabled();
 }
 
 /**
@@ -46,18 +83,20 @@ export function isApiKeyConfigured() {
  * l'API faute de configuration laisserait n'importe qui générer des
  * étiquettes facturées sur le compte UPS.
  */
-export function requireApiKey(req, res, next) {
-  if (!isApiKeyConfigured()) {
+export async function requireApiKey(req, res, next) {
+  if (!isApiUsable()) {
     return next(
       Object.assign(
-        new Error('API non configurée. Renseignez API_KEYS au format « nom:clé ».'),
+        new Error(
+          'API non configurée. Créez une clé depuis l’admin panel, ou renseignez API_KEYS au format « nom:clé ».',
+        ),
         { status: 503, code: 'API_KEYS_NOT_CONFIGURED' },
       ),
     );
   }
 
   const provided = (req.headers['x-api-key'] || '').toString().trim();
-  const client = findApiClient(provided);
+  const client = await resolveApiClient(provided);
 
   if (!client) {
     return next(
@@ -67,6 +106,9 @@ export function requireApiKey(req, res, next) {
       }),
     );
   }
+
+  // Compteur d'usage : non attendu, il ne doit pas retarder la requête.
+  if (client.source === 'db') touchKey(client.id);
 
   // Même forme que l'acteur Keycloak : le journal et les routes existantes
   // n'ont pas à distinguer une personne d'une application.

@@ -279,6 +279,39 @@ CREATE INDEX IF NOT EXISTS comment_mentions_user_idx
 -- Sert la reprise des notifications en échec.
 CREATE INDEX IF NOT EXISTS comment_mentions_pending_idx
   ON comment_mentions (created_at) WHERE notified_at IS NULL;
+
+-- Clés de l'API machine, gérées depuis l'admin panel.
+--
+-- En base plutôt que dans la variable API_KEYS : une clé générée depuis
+-- l'admin doit survivre au redéploiement du conteneur, faute de quoi
+-- l'intégration cesserait de fonctionner sans raison apparente.
+--
+-- API_KEYS reste lu au démarrage et prime : il permet de rétablir un accès
+-- si la base est indisponible.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id           BIGSERIAL PRIMARY KEY,
+  -- Nom de l'application appelante. Apparaît comme auteur dans le journal :
+  -- sans lui, les envois d'une autre application seraient anonymes.
+  client_name  TEXT NOT NULL,
+  token        TEXT NOT NULL,
+  -- Révocation par archivage : une clé retirée reste tracée, et le journal
+  -- des envois qu'elle a créés garde un nom lisible.
+  revoked_at   TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
+  -- Nombre d'appels, pour repérer une clé oubliée ou jamais utilisée.
+  use_count    INTEGER NOT NULL DEFAULT 0,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Deux applications actives ne peuvent porter le même nom : le journal ne
+-- saurait plus laquelle a agi.
+CREATE UNIQUE INDEX IF NOT EXISTS api_keys_client_uniq
+  ON api_keys (LOWER(client_name)) WHERE revoked_at IS NULL;
+
+-- La recherche se fait par jeton à chaque appel authentifié.
+CREATE INDEX IF NOT EXISTS api_keys_token_idx
+  ON api_keys (token) WHERE revoked_at IS NULL;
 `;
 
 export async function migrate() {
@@ -290,7 +323,7 @@ export async function migrate() {
   try {
     await query(SCHEMA);
     console.log(
-      '  → Base PostgreSQL prête (shipments, addresses, activity_log, package_types, shipment_comments, comment_mentions)',
+      '  → Base PostgreSQL prête (shipments, addresses, activity_log, package_types, shipment_comments, comment_mentions, api_keys)',
     );
     return true;
   } catch (err) {

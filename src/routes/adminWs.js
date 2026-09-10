@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
+import { isDbEnabled } from '../db/pool.js';
+import { latestKey, listKeys, createKey, revokeKey } from '../db/apiKeysRepository.js';
 
 /**
  * Description de l'API machine pour l'onglet « WS API » de l'admin panel.
@@ -97,38 +99,118 @@ adminWsRouter.get('/endpoints', (_req, res) => {
 });
 
 /**
- * GET /adminpanel/ws/token — état de la clé, jamais sa valeur.
+ * Nom d'application par défaut à la génération.
  *
- * Les clés vivent dans la variable d'environnement `API_KEYS` : elles ne se
- * génèrent pas depuis l'admin, et les renvoyer ici les exposerait à qui
- * atteint cette route, dépourvue d'authentification propre.
+ * L'admin panel poste sans corps : il faut donc un nom, sinon la clé serait
+ * anonyme dans le journal. Renommable ensuite via le corps de la requête.
  */
-adminWsRouter.get('/token', (_req, res) => {
-  res.json({
-    token: null,
-    updated_at: null,
-    configured: config.apiKeys.length > 0,
-    clients: config.apiKeys.map((entry) => entry.name),
-    message:
-      config.apiKeys.length > 0
-        ? `${config.apiKeys.length} clé(s) configurée(s) dans API_KEYS. Leur valeur n’est pas exposée.`
-        : 'Aucune clé. Renseignez API_KEYS au format « nom:clé » puis redéployez.',
-  });
+const DEFAULT_CLIENT = 'adminpanel';
+
+/**
+ * GET /adminpanel/ws/token — la clé courante.
+ *
+ * Renvoie un aperçu, pas le jeton complet : cette route n'a pas
+ * d'authentification propre, et l'admin y accède par son proxy. Le jeton
+ * entier n'apparaît qu'une fois, à sa création.
+ */
+adminWsRouter.get('/token', async (_req, res, next) => {
+  try {
+    const fromEnv = config.apiKeys.map((entry) => entry.name);
+
+    if (!isDbEnabled()) {
+      return res.json({
+        token: null,
+        updated_at: null,
+        configured: fromEnv.length > 0,
+        clients: fromEnv,
+        message: fromEnv.length
+          ? `${fromEnv.length} clé(s) dans API_KEYS. Leur valeur n’est pas exposée.`
+          : 'Base indisponible et API_KEYS vide : aucune clé utilisable.',
+      });
+    }
+
+    const [current, keys] = await Promise.all([latestKey(), listKeys()]);
+
+    res.json({
+      // `preview` et non le jeton : l'admin affiche ce champ tel quel.
+      token: current?.preview ?? null,
+      updated_at: current?.createdAt ?? null,
+      configured: Boolean(current) || fromEnv.length > 0,
+      clients: [...keys.map((k) => k.clientName), ...fromEnv],
+      keys: keys.map((k) => ({
+        id: k.id,
+        client: k.clientName,
+        preview: k.preview,
+        createdAt: k.createdAt,
+        lastUsedAt: k.lastUsedAt,
+        useCount: k.useCount,
+      })),
+      message: current
+        ? 'Le jeton complet n’est montré qu’à sa création.'
+        : 'Aucune clé. Cliquez sur « Générer » pour en créer une.',
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**
- * POST /adminpanel/ws/token — refuse la génération.
+ * POST /adminpanel/ws/token — crée une clé.
  *
- * Une clé écrite ici ne survivrait pas au redémarrage du conteneur, la
- * configuration venant de l'environnement. Mieux vaut un refus explicite
- * qu'une clé qui semble créée et cesse de fonctionner au prochain déploiement.
+ * C'est le seul moment où le jeton complet est renvoyé : il n'est plus
+ * lisible ensuite, ni en base pour l'admin, ni par cette route.
  */
-adminWsRouter.post('/token', (_req, res) => {
-  res.status(501).json({
-    error: 'Non disponible',
-    message:
-      'Les clés de cette application vivent dans la variable API_KEYS. ' +
-      'Générez-en une avec « openssl rand -hex 32 », ajoutez-la au format ' +
-      '« nom:clé » puis redéployez.',
-  });
+adminWsRouter.post('/token', async (req, res, next) => {
+  try {
+    if (!isDbEnabled()) {
+      throw Object.assign(
+        new Error(
+          'Base de données requise pour générer une clé. Renseignez DATABASE_URL, ou utilisez la variable API_KEYS.',
+        ),
+        { status: 503, code: 'DB_NOT_CONFIGURED' },
+      );
+    }
+
+    const client = String(req.body?.client ?? '').trim() || DEFAULT_CLIENT;
+    const created = await createKey(client);
+
+    // Une clé créée remplace la précédente du même appelant : la trace en
+    // dit assez pour retrouver qui l'a fait, sans exposer le jeton.
+    console.log(`[api] Nouvelle clé pour « ${created.clientName} »`);
+
+    res.status(201).json({
+      token: created.token,
+      updated_at: created.createdAt,
+      client: created.clientName,
+      message:
+        'Copiez ce jeton maintenant : il ne sera plus affiché. ' +
+        'L’application appelante l’envoie dans l’en-tête X-API-Key.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** DELETE /adminpanel/ws/token/:id — révoque une clé. */
+adminWsRouter.delete('/token/:id', async (req, res, next) => {
+  try {
+    if (!isDbEnabled()) {
+      throw Object.assign(new Error('Base de données indisponible.'), { status: 503 });
+    }
+
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      throw Object.assign(new Error('Identifiant invalide.'), { status: 400 });
+    }
+
+    const revoked = await revokeKey(id);
+    if (!revoked) {
+      throw Object.assign(new Error('Clé introuvable ou déjà révoquée.'), { status: 404 });
+    }
+
+    console.log(`[api] Clé révoquée pour « ${revoked.clientName} »`);
+    res.json({ id: revoked.id, client: revoked.clientName, revoked_at: revoked.revokedAt });
+  } catch (err) {
+    next(err);
+  }
 });

@@ -260,14 +260,32 @@ client Node.js et exemple React dans **[examples/](examples/)**.
 Deux traits la distinguent des routes internes :
 
 - **Clé d'API obligatoire**, en en-tête `X-API-Key`. Keycloak identifie des
-  personnes derrière un navigateur ; ici l'appelant est un serveur. Les clés
-  sont déclarées dans `API_KEYS` au format `nom:clé`, et le nom devient
-  l'auteur des actions dans le journal — sans quoi les envois d'une autre
-  application y seraient anonymes.
+  personnes derrière un navigateur ; ici l'appelant est un serveur. Chaque
+  clé porte le nom de l'application appelante, qui devient l'auteur des
+  actions dans le journal — sans quoi les envois d'une autre application y
+  seraient anonymes.
 - **Préfixe versionné**, pour que l'interface évolue sans casser une
   application qu'on ne redéploie pas au même rythme.
 
-Sans `API_KEYS`, `/api/v1` refuse tout appel (`503`) : une API ouverte par
+### Deux sources de clés
+
+| Source | Création | Survit au redéploiement |
+|---|---|---|
+| Table `api_keys` | Admin panel, onglet WS API | oui |
+| Variable `API_KEYS` | `nom:clé`, séparés par des virgules | oui, mais exige un redéploiement |
+
+La variable est consultée en premier : elle ne dépend pas de la base et reste
+le moyen de rétablir un accès si celle-ci est indisponible.
+
+Le jeton complet n'est montré **qu'à sa création** : ensuite, seul un aperçu
+est lisible. La route qui les sert passe par le proxy de l'admin panel et n'a
+pas d'authentification propre — renvoyer le jeton entier l'exposerait.
+
+Générer une clé pour une application en révoque la précédente : deux clés
+valides pour le même appelant rendraient toute révocation illusoire. Chaque
+clé compte ses usages, ce qui permet de repérer celle qui ne sert plus.
+
+Sans aucune source, `/api/v1` refuse tout appel (`503`) : une API ouverte par
 défaut laisserait n'importe qui générer des étiquettes facturées.
 
 La comparaison des clés est à durée constante (`timingSafeEqual`) : un `===`

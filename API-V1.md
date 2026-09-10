@@ -16,10 +16,14 @@ Toute requête porte l'en-tête `X-API-Key` :
 X-API-Key: votre-cle-secrete
 ```
 
-La clé est délivrée par l'administrateur du backend, qui l'ajoute à la
-variable `API_KEYS` au format `nom:clé`. Le *nom* apparaît comme auteur dans
-le journal d'activité : les envois créés par votre application y sont
+La clé est délivrée par l'administrateur du backend, depuis l'admin panel
+(onglet **WS API**, bouton « Générer un nouveau token ») ou via la variable
+`API_KEYS` au format `nom:clé`. Le *nom* apparaît comme auteur dans le
+journal d'activité : les envois créés par votre application y sont
 identifiés au lieu d'être anonymes.
+
+Le jeton n'est affiché **qu'une fois**, à sa création : conservez-le dès ce
+moment. En générer un nouveau pour la même application révoque le précédent.
 
 | Réponse | Cause |
 |---|---|
