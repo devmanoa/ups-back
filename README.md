@@ -277,9 +277,16 @@ Deux traits la distinguent des routes internes :
 La variable est consultée en premier : elle ne dépend pas de la base et reste
 le moyen de rétablir un accès si celle-ci est indisponible.
 
-Le jeton complet n'est montré **qu'à sa création** : ensuite, seul un aperçu
-est lisible. La route qui les sert passe par le proxy de l'admin panel et n'a
-pas d'authentification propre — renvoyer le jeton entier l'exposerait.
+Le jeton complet n'est montré **qu'à sa création** : il n'est pas stocké,
+seule son empreinte SHA-256 l'est, avec ses premiers caractères pour le
+reconnaître. Une sauvegarde ou une requête de diagnostic ne peuvent donc
+rien livrer d'utilisable.
+
+Les routes de gestion (`/adminpanel/ws/token`) exigent le rôle Keycloak
+`admin`, que le proxy de l'admin panel relaie. Sans Keycloak, elles refusent
+— une clé ouvre un compte facturé, et un backend sans authentification ne
+doit pas pouvoir en fabriquer ; la variable `API_KEYS` reste alors le moyen
+d'en déclarer une.
 
 Générer une clé pour une application en révoque la précédente : deux clés
 valides pour le même appelant rendraient toute révocation illusoire. Chaque
@@ -288,9 +295,13 @@ clé compte ses usages, ce qui permet de repérer celle qui ne sert plus.
 Sans aucune source, `/api/v1` refuse tout appel (`503`) : une API ouverte par
 défaut laisserait n'importe qui générer des étiquettes facturées.
 
-La comparaison des clés est à durée constante (`timingSafeEqual`) : un `===`
-sort au premier caractère différent et laisserait retrouver la clé caractère
-par caractère en mesurant le temps de réponse.
+Le temps de réponse ne renseigne pas sur la clé, par deux moyens selon la
+source : les clés de `API_KEYS` sont comparées à durée constante
+(`timingSafeEqual`), et celles de la base sont retrouvées par leur empreinte
+SHA-256 — comparer l'empreinte et non le jeton rend la recherche
+indifférente aux caractères qui coïncident. Un `===` sur le jeton sortirait
+au premier caractère différent et le laisserait retrouver caractère par
+caractère.
 
 ### Commandes (lots d'envoi groupé)
 

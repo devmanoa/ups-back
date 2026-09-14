@@ -1,18 +1,29 @@
 /**
  * Clés de l'API machine, créées depuis l'admin panel.
  *
- * Deux points sensibles : le jeton complet ne doit apparaître qu'une fois, et
- * une clé révoquée doit cesser d'ouvrir l'API.
+ * Trois points sensibles : la génération exige le rôle admin, le jeton
+ * complet n'apparaît qu'une fois, et une clé révoquée cesse d'ouvrir l'API.
+ *
+ * Le dépôt est simulé : sans base locale, le SQL réel n'est pas exécuté ici.
+ * Le mock garde les règles au minimum (empreinte, filtre des révoquées) ;
+ * la règle « générer révoque la précédente » est celle du dépôt, et
+ * reproduite ici pour que les tests d'API la traversent.
  */
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const src = (p) => pathToFileURL(path.resolve(import.meta.dirname, '../src', p)).href;
 
-/** Table api_keys simulée. */
-const state = { keys: [], nextId: 1, dbEnabled: true };
+const sha = (t) => createHash('sha256').update(t).digest('hex');
+
+/** Table api_keys simulée, avec empreintes comme en base. */
+const state = { keys: [], nextId: 1, dbEnabled: true, dbDown: false, actor: null };
+
+const ADMIN = { id: 'u-admin', name: 'Sébastien', roles: ['admin'] };
+const SIMPLE = { id: 'u-simple', name: 'Julie', roles: ['user'] };
 
 mock.module(src('db/pool.js'), {
   namedExports: {
@@ -22,46 +33,55 @@ mock.module(src('db/pool.js'), {
   },
 });
 
+const publicOf = (k) => ({
+  id: k.id,
+  clientName: k.clientName,
+  preview: `${k.prefix}… (jeton masqué, affiché à la création)`,
+  revokedAt: k.revokedAt,
+  lastUsedAt: k.lastUsedAt,
+  useCount: k.useCount,
+  createdAt: k.createdAt,
+});
+
 mock.module(src('db/apiKeysRepository.js'), {
   namedExports: {
-    generateToken: () => 'jeton-' + Math.random().toString(16).slice(2),
-    previewOf: (t) => (t ? `${String(t).slice(0, 8)}••••` : null),
-    latestKey: async () => {
-      const active = state.keys.filter((k) => !k.revokedAt);
-      const last = active[active.length - 1];
-      return last ? { ...last, preview: `${last.token.slice(0, 8)}••••` } : null;
+    listKeys: async () => {
+      if (state.dbDown) throw new Error('connexion refusée');
+      return state.keys.filter((k) => !k.revokedAt).reverse().map(publicOf);
     },
-    listKeys: async () =>
-      state.keys
-        .filter((k) => !k.revokedAt)
-        .map((k) => ({ ...k, preview: `${k.token.slice(0, 8)}••••` })),
+    hasActiveKeys: async () => {
+      if (state.dbDown) throw new Error('connexion refusée');
+      return state.keys.some((k) => !k.revokedAt);
+    },
     createKey: async (clientName) => {
-      // Comme le vrai dépôt : la clé précédente du même appelant est révoquée.
       for (const k of state.keys) {
         if (k.clientName.toLowerCase() === clientName.toLowerCase() && !k.revokedAt) {
           k.revokedAt = new Date().toISOString();
         }
       }
+      const token = `jeton-secret-${state.nextId}-${Math.random().toString(16).slice(2)}`;
       const key = {
         id: state.nextId++,
         clientName,
-        token: 'jeton-secret-' + state.nextId,
+        hash: sha(token),
+        prefix: token.slice(0, 8),
         revokedAt: null,
         useCount: 0,
         lastUsedAt: null,
         createdAt: new Date().toISOString(),
       };
       state.keys.push(key);
-      return key;
+      return { ...publicOf(key), token };
     },
     revokeKey: async (id) => {
       const key = state.keys.find((k) => k.id === id && !k.revokedAt);
       if (!key) return null;
       key.revokedAt = new Date().toISOString();
-      return key;
+      return publicOf(key);
     },
     findByToken: async (token) => {
-      const key = state.keys.find((k) => k.token === token && !k.revokedAt);
+      if (state.dbDown) throw new Error('connexion refusée');
+      const key = state.keys.find((k) => k.hash === sha(String(token)) && !k.revokedAt);
       return key ? { id: key.id, name: key.clientName } : null;
     },
     touchKey: (id) => {
@@ -79,6 +99,11 @@ const { default: express } = await import('express');
 async function startServer(t) {
   const app = express();
   app.use(express.json());
+  // Simule attachActor, qui dépend de Keycloak.
+  app.use((req, res, next) => {
+    req.actor = state.actor;
+    next();
+  });
   app.use('/adminpanel/ws', adminWsRouter);
   app.use(errorHandler);
 
@@ -102,7 +127,58 @@ function reset() {
   state.keys = [];
   state.nextId = 1;
   state.dbEnabled = true;
+  state.dbDown = false;
+  state.actor = ADMIN;
 }
+
+/** Joue requireApiKey et capture ce qu'il transmet à next(). */
+async function authenticate(token) {
+  let passed = null;
+  const req = { headers: token ? { 'x-api-key': token } : {} };
+  await requireApiKey(req, {}, (err) => {
+    passed = err ?? 'ok';
+  });
+  return { outcome: passed, actor: req.actor };
+}
+
+test('la liste des routes reste publique', async (t) => {
+  reset();
+  state.actor = null;
+  const call = await startServer(t);
+
+  const res = await call('GET', '/adminpanel/ws/endpoints');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.count > 0);
+});
+
+test('sans identite, la gestion des cles est refusee', async (t) => {
+  reset();
+  state.actor = null;
+  const call = await startServer(t);
+
+  // Une cle ouvre un compte UPS facture : sa fabrication ne peut pas
+  // dependre d'une protection situee dans un autre depot.
+  const created = await call('POST', '/adminpanel/ws/token', { client: 'pirate' });
+  assert.equal(created.status, 401);
+  assert.equal(state.keys.length, 0, 'aucune cle ne doit avoir ete creee');
+
+  const listed = await call('GET', '/adminpanel/ws/token');
+  assert.equal(listed.status, 401);
+
+  const removed = await call('DELETE', '/adminpanel/ws/token/1');
+  assert.equal(removed.status, 401);
+});
+
+test('un utilisateur sans le role admin est refuse', async (t) => {
+  reset();
+  state.actor = SIMPLE;
+  const call = await startServer(t);
+
+  const res = await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error.code, 'ADMIN_REQUIRED');
+  assert.equal(state.keys.length, 0);
+});
 
 test('la generation renvoie le jeton complet, une seule fois', async (t) => {
   reset();
@@ -113,11 +189,12 @@ test('la generation renvoie le jeton complet, une seule fois', async (t) => {
   assert.ok(created.body.token, 'le jeton doit etre renvoye a la creation');
   assert.equal(created.body.client, 'antennes');
 
-  // Relu ensuite, seul l'apercu doit apparaitre : cette route n'a pas
-  // d'authentification propre.
+  // Relu ensuite : le jeton n'est pas stocke, seul un apercu explicite
+  // apparait, pour qu'un copier-coller ne passe pas pour un jeton valide.
   const read = await call('GET', '/adminpanel/ws/token');
-  assert.notEqual(read.body.token, created.body.token, 'le jeton complet ne doit plus sortir');
-  assert.match(read.body.token, /••••/, 'un apercu masque doit etre renvoye');
+  assert.notEqual(read.body.token, created.body.token);
+  assert.match(read.body.token, /masqué/);
+  assert.doesNotMatch(JSON.stringify(read.body), new RegExp(created.body.token));
 });
 
 test('sans nom, la cle porte un appelant par defaut', async (t) => {
@@ -128,7 +205,7 @@ test('sans nom, la cle porte un appelant par defaut', async (t) => {
   // le journal des envois.
   const created = await call('POST', '/adminpanel/ws/token');
   assert.equal(created.status, 201);
-  assert.ok(created.body.client, 'un nom d appelant est obligatoire');
+  assert.ok(created.body.client);
 });
 
 test('generer a nouveau revoque la cle precedente du meme appelant', async (t) => {
@@ -152,11 +229,8 @@ test('deux applications gardent chacune leur cle', async (t) => {
   const a = await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
   const b = await call('POST', '/adminpanel/ws/token', { client: 'crm' });
 
-  const clientA = await resolveApiClient(a.body.token);
-  const clientB = await resolveApiClient(b.body.token);
-
-  assert.equal(clientA?.name, 'antennes');
-  assert.equal(clientB?.name, 'crm', 'la cle d une app ne doit pas revoquer celle d une autre');
+  assert.equal((await resolveApiClient(a.body.token))?.name, 'antennes');
+  assert.equal((await resolveApiClient(b.body.token))?.name, 'crm');
 });
 
 test('une cle revoquee n ouvre plus l API', async (t) => {
@@ -167,18 +241,27 @@ test('une cle revoquee n ouvre plus l API', async (t) => {
   assert.ok(await resolveApiClient(created.body.token));
 
   const keys = await call('GET', '/adminpanel/ws/token');
-  const id = keys.body.keys[0].id;
-
-  const removed = await call('DELETE', `/adminpanel/ws/token/${id}`);
+  const removed = await call('DELETE', `/adminpanel/ws/token/${keys.body.keys[0].id}`);
   assert.equal(removed.status, 200);
   assert.equal(await resolveApiClient(created.body.token), null);
 });
 
-test('un jeton inconnu n ouvre rien', async (t) => {
+test('un identifiant invalide est une erreur de validation', async (t) => {
   reset();
-  await startServer(t);
-  assert.equal(await resolveApiClient('jeton-invente'), null);
-  assert.equal(await resolveApiClient(''), null);
+  const call = await startServer(t);
+
+  const res = await call('DELETE', '/adminpanel/ws/token/abc');
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error.code, 'VALIDATION_ERROR');
+});
+
+test('une cle inconnue a la revocation est un 404 code', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const res = await call('DELETE', '/adminpanel/ws/token/999');
+  assert.equal(res.status, 404);
+  assert.equal(res.body.error.code, 'NOT_FOUND');
 });
 
 test('l usage de la cle est compte a chaque appel authentifie', async (t) => {
@@ -186,19 +269,57 @@ test('l usage de la cle est compte a chaque appel authentifie', async (t) => {
   const call = await startServer(t);
 
   const created = await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
-
-  // Compte par le middleware et non par la resolution : c'est l'appel a
-  // l'API qui doit etre mesure, pas la simple recherche du jeton.
-  const next = () => {};
-  const res = { status: () => res, json: () => res };
-  for (let i = 0; i < 2; i++) {
-    await requireApiKey({ headers: { 'x-api-key': created.body.token } }, res, next);
-  }
+  await authenticate(created.body.token);
+  await authenticate(created.body.token);
 
   const keys = await call('GET', '/adminpanel/ws/token');
-  // Repere une cle jamais utilisee, ou toujours active alors qu'elle ne
-  // sert plus.
   assert.equal(keys.body.keys[0].useCount, 2);
+});
+
+test('la cle authentifiee devient l auteur des actions', async (t) => {
+  reset();
+  const call = await startServer(t);
+
+  const created = await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
+  const { outcome, actor } = await authenticate(created.body.token);
+
+  assert.equal(outcome, 'ok');
+  assert.equal(actor?.name, 'antennes');
+  assert.equal(actor?.type, 'api');
+});
+
+test('un jeton faux est un 401, quand des cles existent', async (t) => {
+  reset();
+  const call = await startServer(t);
+  await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
+
+  const { outcome } = await authenticate('jeton-invente');
+  assert.equal(outcome.status, 401);
+  assert.equal(outcome.code, 'INVALID_API_KEY');
+});
+
+test('sans aucune cle, l API repond non configuree plutot que cle invalide', async (t) => {
+  reset();
+  await startServer(t);
+
+  // Dire << cle invalide >> enverrait l'integrateur verifier un jeton
+  // correct, alors que c'est le serveur qui n'en a aucune.
+  const { outcome } = await authenticate('nimporte-quoi');
+  assert.equal(outcome.status, 503);
+  assert.equal(outcome.code, 'API_KEYS_NOT_CONFIGURED');
+});
+
+test('base en panne : 503, jamais << cle invalide >>', async (t) => {
+  reset();
+  const call = await startServer(t);
+  const created = await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
+
+  state.dbDown = true;
+  // Un partenaire a la cle valide ne doit pas la croire fausse pendant une
+  // panne : il la ferait tourner pour rien, ou cesserait de reessayer.
+  const { outcome } = await authenticate(created.body.token);
+  assert.equal(outcome.status, 503);
+  assert.equal(outcome.code, 'API_KEYS_UNAVAILABLE');
 });
 
 test('sans base, la generation est refusee explicitement', async (t) => {
@@ -207,8 +328,8 @@ test('sans base, la generation est refusee explicitement', async (t) => {
   const call = await startServer(t);
 
   const res = await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
-  // Un 503 explicite plutot qu'une cle qui semble creee et disparait.
   assert.equal(res.status, 503);
+  assert.equal(res.body.error.code, 'DB_NOT_CONFIGURED');
 });
 
 test('une cle revoquee ne bloque pas la reprise du meme nom', async (t) => {
@@ -220,6 +341,6 @@ test('une cle revoquee ne bloque pas la reprise du meme nom', async (t) => {
   await call('DELETE', `/adminpanel/ws/token/${keys.body.keys[0].id}`);
 
   const again = await call('POST', '/adminpanel/ws/token', { client: 'antennes' });
-  assert.equal(again.status, 201, 'le nom doit rester reutilisable apres revocation');
+  assert.equal(again.status, 201);
   assert.notEqual(again.body.token, first.body.token);
 });

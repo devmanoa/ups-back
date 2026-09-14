@@ -75,3 +75,37 @@ export function requireActor(req, res, next) {
   }
   next();
 }
+
+/**
+ * Exige le rôle Keycloak `admin`, sans jamais laisser passer par défaut.
+ *
+ * Réservé aux routes qui manipulent des secrets — la génération de clés
+ * d'API en particulier. À la différence de requireActor, Keycloak absent ne
+ * vaut pas laissez-passer : une clé d'API ouvre un compte UPS facturé, et
+ * un backend sans authentification ne doit pas pouvoir en fabriquer. Sans
+ * Keycloak, la variable API_KEYS reste le moyen de déclarer une clé.
+ *
+ * Le rôle `admin` est celui que la plateforme Konitys donne à ses
+ * administrateurs ; c'est lui que le proxy de l'admin panel relaie.
+ */
+export function requireAdmin(req, res, next) {
+  if (!req.actor) {
+    return next(
+      Object.assign(new Error('Authentification requise.'), {
+        status: 401,
+        code: 'AUTH_REQUIRED',
+      }),
+    );
+  }
+
+  if (!req.actor.roles?.includes('admin')) {
+    return next(
+      Object.assign(new Error('Réservé aux administrateurs.'), {
+        status: 403,
+        code: 'ADMIN_REQUIRED',
+      }),
+    );
+  }
+
+  next();
+}

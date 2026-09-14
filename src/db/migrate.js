@@ -293,25 +293,57 @@ CREATE TABLE IF NOT EXISTS api_keys (
   -- Nom de l'application appelante. Apparaît comme auteur dans le journal :
   -- sans lui, les envois d'une autre application seraient anonymes.
   client_name  TEXT NOT NULL,
-  token        TEXT NOT NULL,
+  -- Le jeton n'est jamais stocké en clair : seule son empreinte SHA-256 l'est.
+  -- Une sauvegarde, une réplique ou une requête de diagnostic ne peuvent
+  -- donc pas livrer une clé utilisable. Le jeton lui-même n'existe qu'à sa
+  -- création, dans la réponse qui le montre une fois.
+  token_hash   TEXT NOT NULL,
+  -- Premiers caractères en clair, pour reconnaître une clé dans une liste
+  -- sans permettre de s'en servir.
+  token_prefix TEXT NOT NULL,
   -- Révocation par archivage : une clé retirée reste tracée, et le journal
   -- des envois qu'elle a créés garde un nom lisible.
   revoked_at   TIMESTAMPTZ,
   last_used_at TIMESTAMPTZ,
   -- Nombre d'appels, pour repérer une clé oubliée ou jamais utilisée.
   use_count    INTEGER NOT NULL DEFAULT 0,
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Reprise d'une base ayant connu la première version de la table, où le
+-- jeton était en clair : on calcule l'empreinte puis on retire la colonne.
+-- Dans un bloc conditionnel, car référencer une colonne absente ferait
+-- échouer tout le schéma.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'api_keys' AND column_name = 'token'
+  ) THEN
+    ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS token_hash   TEXT;
+    ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS token_prefix TEXT;
+    UPDATE api_keys
+       SET token_hash   = encode(sha256(convert_to(token, 'UTF8')), 'hex'),
+           token_prefix = LEFT(token, 8)
+     WHERE token_hash IS NULL;
+    ALTER TABLE api_keys ALTER COLUMN token_hash   SET NOT NULL;
+    ALTER TABLE api_keys ALTER COLUMN token_prefix SET NOT NULL;
+    ALTER TABLE api_keys DROP COLUMN token;
+    ALTER TABLE api_keys DROP COLUMN IF EXISTS updated_at;
+  END IF;
+END $$;
+
+DROP INDEX IF EXISTS api_keys_token_idx;
 
 -- Deux applications actives ne peuvent porter le même nom : le journal ne
 -- saurait plus laquelle a agi.
 CREATE UNIQUE INDEX IF NOT EXISTS api_keys_client_uniq
   ON api_keys (LOWER(client_name)) WHERE revoked_at IS NULL;
 
--- La recherche se fait par jeton à chaque appel authentifié.
-CREATE INDEX IF NOT EXISTS api_keys_token_idx
-  ON api_keys (token) WHERE revoked_at IS NULL;
+-- La recherche se fait par empreinte à chaque appel authentifié. Unique :
+-- deux clés de même empreinte rendraient le choix de l'appelant arbitraire.
+CREATE UNIQUE INDEX IF NOT EXISTS api_keys_hash_uniq
+  ON api_keys (token_hash);
 `;
 
 export async function migrate() {

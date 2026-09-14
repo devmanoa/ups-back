@@ -54,14 +54,16 @@ app.get('/health', (req, res) => {
 // rester public, comme /health, et donc precede attachActor.
 app.use('/adminpanel/permissions-schema', permissionsSchemaRouter);
 
-// Description de l'API machine pour l'onglet WS API de l'admin panel. Public
-// comme le schema : l'admin y accede par son proxy, sans jeton applicatif.
-app.use('/adminpanel/ws', adminWsRouter);
 
 // Identifie l'appelant à partir du jeton Keycloak, pour nommer les auteurs
 // dans le journal d'activité. Placé après /health, qui doit rester joignable
 // sans authentification pour le healthcheck Coolify.
 app.use(attachActor);
+
+// Onglet WS API de l'admin panel. Monte apres attachActor : la liste des
+// routes reste publique, mais la gestion des cles exige le role Keycloak
+// admin, que le proxy de l'admin panel relaie avec chaque appel.
+app.use('/adminpanel/ws', adminWsRouter);
 
 /** Vérifie que les identifiants UPS fonctionnent réellement. */
 app.get(

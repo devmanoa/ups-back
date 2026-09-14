@@ -47,6 +47,7 @@ test('les modules de la couche base se chargent', async () => {
     'db/activityRepository.js',
     'db/addressesRepository.js',
     'db/packageTypesRepository.js',
+    'db/apiKeysRepository.js',
   ]) {
     await import(pathToFileURL(path.join(srcDir, entry)).href);
   }

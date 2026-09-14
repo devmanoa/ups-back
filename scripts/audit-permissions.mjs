@@ -23,10 +23,6 @@ const EXEMPTES = {
   'locator.js': 'consultation seule — recherche de points relais',
   'timeInTransit.js': 'consultation seule — estimation de délai',
   'landedCost.js': 'consultation seule — estimation de coût',
-  // Joignables uniquement via le proxy de l'admin panel, dont toutes les
-  // routes /api exigent le role Keycloak 'admin' (requireAdmin). Ce role
-  // passe outre les permissions Konitys : un requirePerm n'ajouterait rien.
-  'adminWs.js': 'proxy admin panel : role Keycloak admin exige en amont',
 };
 
 let manquantes = 0;
@@ -38,7 +34,12 @@ for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js'))) {
 
   // Garde posée sur le routeur entier : elle couvre toutes ses routes, et
   // les répéter une à une n'ajouterait rien.
-  const gardeGlobale = /Router\.use\(\s*requirePerm\(/.test(source);
+  // requireAdmin (rôle Keycloak admin, qui passe outre les permissions) vaut
+  // garde au même titre que requirePerm. requireActor seul, non : c'est une
+  // identité, pas un droit.
+  // Ancré en début de ligne : une garde mise en commentaire ne doit pas
+  // compter, sinon un « // » suffirait à faire passer l'audit au vert.
+  const gardeGlobale = /^\s*\w+Router\.use\((?:'[^']*',\s*)?(?:requirePerm\(|requireAdmin\b)/m.test(source);
 
   lines.forEach((line, i) => {
     if (gardeGlobale) return;
@@ -47,7 +48,8 @@ for (const file of readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.js'))) {
     // La garde suit la déclaration, avant le gestionnaire. La fenêtre est
     // large : un commentaire explicatif peut s'intercaler entre les deux.
     const suite = lines.slice(i + 1, i + 8).join('\n');
-    if (/requirePerm\(/.test(suite) || /requirePerm\(/.test(line)) return;
+    // Même ancrage que la garde globale : un « // requirePerm » ne compte pas.
+    if (/^\s*(?:requirePerm\(|requireAdmin\b)/m.test(suite) || /requirePerm\(/.test(line)) return;
 
     const chemin = (suite.match(/'([^']*)'/) ?? [])[1] ?? '?';
     const verbe = (line.match(/\.(post|put|patch|delete)\(/) ?? [])[1] ?? '?';
